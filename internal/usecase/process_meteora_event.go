@@ -238,7 +238,7 @@ func (uc *ProcessMeteoraEventUseCase) isSpamToken(symbol string) bool {
 		return true
 	}
 
-	// Simple spam detection rules
+	// Spam detection rules
 	spamPatterns := []string{
 		"TEST",
 		"FAKE",

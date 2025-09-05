@@ -192,7 +192,7 @@ func (uc *NotifyMeteoraPoolCreationUseCase) isSpamToken(symbol string) bool {
 		return true
 	}
 
-	// Simple spam detection rules (this could be configurable)
+	// Spam detection rules (this could be configurable)
 	spamPatterns := []string{
 		"TEST",
 		"FAKE",

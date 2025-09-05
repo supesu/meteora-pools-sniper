@@ -28,7 +28,7 @@ func main() {
 
 	// Create Meteora scanner
 	log.Info("Starting Meteora pool scanner...")
-	scanner := solana.NewSimpleMeteoraScanner(cfg, log)
+	scanner := solana.NewMeteoraScanner(cfg, log)
 
 	// Handle graceful shutdown
 	_, cancel := context.WithCancel(context.Background())

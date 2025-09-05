@@ -7,11 +7,27 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/supesu/sniping-bot-v2/pkg/config"
 	"github.com/supesu/sniping-bot-v2/pkg/domain"
 	"github.com/supesu/sniping-bot-v2/pkg/logger"
+)
+
+const (
+	// DefaultTimeout is the default HTTP timeout for Discord requests
+	DefaultTimeout = 30 * time.Second
+
+	// MeteoraBrandColor is the official Meteora brand color (teal)
+	MeteoraBrandColor = 0x00D4AA
+
+	// HTTPStatusOK is the HTTP 200 OK status code
+	HTTPStatusOK = 200
+
+	// HTTPStatusMultipleChoices is the upper bound for successful HTTP status codes
+	HTTPStatusMultipleChoices = 300
 )
 
 // Bot represents a Discord bot adapter
@@ -19,13 +35,16 @@ type Bot struct {
 	config     *config.DiscordConfig
 	logger     logger.Logger
 	httpClient *http.Client
+	session    *discordgo.Session
+	isRunning  bool
+	mu         sync.RWMutex
 }
 
 // NewBot creates a new Discord bot adapter
 func NewBot(cfg *config.DiscordConfig, log logger.Logger) *Bot {
 	timeout, err := time.ParseDuration(cfg.Timeout)
 	if err != nil {
-		timeout = 30 * time.Second
+		timeout = DefaultTimeout
 	}
 
 	return &Bot{
@@ -98,6 +117,89 @@ func (b *Bot) IsHealthy(ctx context.Context) error {
 	// For webhook, we can't really test without sending a message
 	// For bot token, we could ping the Discord API, but for simplicity we'll just check config
 	return nil
+}
+
+// Start starts the Discord bot and connects to the gateway
+func (b *Bot) Start(ctx context.Context) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.isRunning {
+		return fmt.Errorf("bot is already running")
+	}
+
+	if b.config.BotToken == "" {
+		return fmt.Errorf("bot token is required for gateway connection")
+	}
+
+	// Create a new Discord session using the provided bot token
+	session, err := discordgo.New("Bot " + b.config.BotToken)
+	if err != nil {
+		return fmt.Errorf("failed to create Discord session: %w", err)
+	}
+
+	// Add event handlers
+	session.AddHandler(b.onReady)
+	session.AddHandler(b.onDisconnect)
+
+	// Open the websocket connection to Discord
+	err = session.Open()
+	if err != nil {
+		return fmt.Errorf("failed to open Discord connection: %w", err)
+	}
+
+	b.session = session
+	b.isRunning = true
+
+	b.logger.Info("Discord bot started successfully")
+	return nil
+}
+
+// Stop stops the Discord bot and closes the gateway connection
+func (b *Bot) Stop() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if !b.isRunning {
+		return nil
+	}
+
+	if b.session != nil {
+		err := b.session.Close()
+		if err != nil {
+			b.logger.WithError(err).Error("Failed to close Discord session")
+			return err
+		}
+	}
+
+	b.isRunning = false
+	b.session = nil
+
+	b.logger.Info("Discord bot stopped successfully")
+	return nil
+}
+
+// IsRunning returns whether the bot is currently running
+func (b *Bot) IsRunning() bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.isRunning
+}
+
+// onReady is called when the bot successfully connects to Discord
+func (b *Bot) onReady(s *discordgo.Session, event *discordgo.Ready) {
+	b.logger.WithFields(map[string]interface{}{
+		"username":      event.User.Username,
+		"discriminator": event.User.Discriminator,
+		"guilds":        len(event.Guilds),
+	}).Info("Discord bot is ready and online")
+}
+
+// onDisconnect is called when the bot disconnects from Discord
+func (b *Bot) onDisconnect(s *discordgo.Session, event *discordgo.Disconnect) {
+	b.logger.Warn("Discord bot disconnected")
+	// The discordgo library handles reconnection automatically
+	// We don't need to manually restart here
 }
 
 // createTokenCreationEmbed creates a Discord embed for token creation events
@@ -233,7 +335,7 @@ func (b *Bot) createMeteoraPoolEmbed(event *domain.MeteoraPoolEvent) DiscordEmbe
 	embed := DiscordEmbed{
 		Title:       "🌊 New Meteora Pool Created!",
 		Description: fmt.Sprintf("A new liquidity pool **%s** has been created on Meteora!", event.GetPairDisplayName()),
-		Color:       0x00D4AA, // Meteora brand color (teal)
+		Color:       MeteoraBrandColor, // Meteora brand color (teal)
 		Timestamp:   event.CreatedAt.Format(time.RFC3339),
 		Fields: []EmbedField{
 			{
@@ -381,7 +483,7 @@ func (b *Bot) sendWebhookMessage(ctx context.Context, message DiscordMessage) er
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if resp.StatusCode < HTTPStatusOK || resp.StatusCode >= HTTPStatusMultipleChoices {
 		return fmt.Errorf("webhook request failed with status: %d", resp.StatusCode)
 	}
 
@@ -390,6 +492,64 @@ func (b *Bot) sendWebhookMessage(ctx context.Context, message DiscordMessage) er
 
 // sendBotMessage sends a message using Discord bot API
 func (b *Bot) sendBotMessage(ctx context.Context, message DiscordMessage) error {
+	b.mu.RLock()
+	session := b.session
+	isRunning := b.isRunning
+	b.mu.RUnlock()
+
+	if !isRunning || session == nil {
+		// Fall back to HTTP API if session is not available
+		return b.sendBotMessageHTTP(ctx, message)
+	}
+
+	// Convert DiscordEmbed to discordgo.MessageEmbed
+	var embeds []*discordgo.MessageEmbed
+	for _, embed := range message.Embeds {
+		dgEmbed := &discordgo.MessageEmbed{
+			Title:       embed.Title,
+			Description: embed.Description,
+			URL:         embed.URL,
+			Timestamp:   embed.Timestamp,
+			Color:       embed.Color,
+		}
+
+		// Convert fields
+		if len(embed.Fields) > 0 {
+			dgEmbed.Fields = make([]*discordgo.MessageEmbedField, len(embed.Fields))
+			for i, field := range embed.Fields {
+				dgEmbed.Fields[i] = &discordgo.MessageEmbedField{
+					Name:   field.Name,
+					Value:  field.Value,
+					Inline: field.Inline,
+				}
+			}
+		}
+
+		// Convert footer
+		if embed.Footer.Text != "" {
+			dgEmbed.Footer = &discordgo.MessageEmbedFooter{
+				Text: embed.Footer.Text,
+			}
+		}
+
+		embeds = append(embeds, dgEmbed)
+	}
+
+	// Send message using discordgo session
+	_, err := session.ChannelMessageSendComplex(b.config.ChannelID, &discordgo.MessageSend{
+		Content: message.Content,
+		Embeds:  embeds,
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to send message via discordgo: %w", err)
+	}
+
+	return nil
+}
+
+// sendBotMessageHTTP sends a message using Discord HTTP API (fallback)
+func (b *Bot) sendBotMessageHTTP(ctx context.Context, message DiscordMessage) error {
 	// Convert to bot API format
 	botMessage := BotMessage{
 		Content: message.Content,
@@ -416,7 +576,7 @@ func (b *Bot) sendBotMessage(ctx context.Context, message DiscordMessage) error 
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if resp.StatusCode < HTTPStatusOK || resp.StatusCode >= HTTPStatusMultipleChoices {
 		return fmt.Errorf("bot request failed with status: %d", resp.StatusCode)
 	}
 

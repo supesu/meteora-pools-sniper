@@ -21,7 +21,17 @@ import (
 	"github.com/supesu/sniping-bot-v2/pkg/config"
 	"github.com/supesu/sniping-bot-v2/pkg/domain"
 	"github.com/supesu/sniping-bot-v2/pkg/logger"
-	"github.com/supesu/sniping-bot-v2/pkg/metrics"
+)
+
+const (
+	// EventChannelBufferSize defines the buffer size for event streaming channels
+	EventChannelBufferSize = 100
+
+	// SPLTokenProgramID is the Solana SPL Token Program ID
+	SPLTokenProgramID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+
+	// SystemProgramID is the Solana System Program ID
+	SystemProgramID = "11111111111111111111111111111111"
 )
 
 // Server represents the Clean Architecture compliant gRPC server
@@ -34,49 +44,46 @@ type Server struct {
 	grpcServer *grpc.Server
 
 	// Use cases (application layer)
-	processTransactionUC    *usecase.ProcessTransactionUseCase
-	getTransactionHistoryUC *usecase.GetTransactionHistoryUseCase
-	manageSubscriptionsUC   *usecase.ManageSubscriptionsUseCase
-	notifyTokenCreationUC   *usecase.NotifyTokenCreationUseCase
-	processMeteoraEventUC   *usecase.ProcessMeteoraEventUseCase
+	processTransactionUC        *usecase.ProcessTransactionUseCase
+	getTransactionHistoryUC     *usecase.GetTransactionHistoryUseCase
+	manageSubscriptionsUC       *usecase.ManageSubscriptionsUseCase
+	notifyTokenCreationUC       *usecase.NotifyTokenCreationUseCase
+	processMeteoraEventUC       *usecase.ProcessMeteoraEventUseCase
+	notifyMeteoraPoolCreationUC *usecase.NotifyMeteoraPoolCreationUseCase
 
 	// Repositories (infrastructure layer)
 	subscriptionRepo domain.SubscriptionRepository
 
 	// Event streaming
 	eventStreams map[string]chan *pb.TransactionEvent
-
-	// Metrics
-	metricsServer *metrics.Server
-	grpcMetrics   *metrics.GRPCMetrics
 }
 
 // Dependencies holds all dependencies for the server
 type Dependencies struct {
-	Config                  *config.Config
-	Logger                  logger.Logger
-	ProcessTransactionUC    *usecase.ProcessTransactionUseCase
-	GetTransactionHistoryUC *usecase.GetTransactionHistoryUseCase
-	ManageSubscriptionsUC   *usecase.ManageSubscriptionsUseCase
-	NotifyTokenCreationUC   *usecase.NotifyTokenCreationUseCase
-	ProcessMeteoraEventUC   *usecase.ProcessMeteoraEventUseCase
-	SubscriptionRepo        domain.SubscriptionRepository
+	Config                      *config.Config
+	Logger                      logger.Logger
+	ProcessTransactionUC        *usecase.ProcessTransactionUseCase
+	GetTransactionHistoryUC     *usecase.GetTransactionHistoryUseCase
+	ManageSubscriptionsUC       *usecase.ManageSubscriptionsUseCase
+	NotifyTokenCreationUC       *usecase.NotifyTokenCreationUseCase
+	ProcessMeteoraEventUC       *usecase.ProcessMeteoraEventUseCase
+	NotifyMeteoraPoolCreationUC *usecase.NotifyMeteoraPoolCreationUseCase
+	SubscriptionRepo            domain.SubscriptionRepository
 }
 
 // NewServer creates a new Clean Architecture compliant gRPC server
 func NewServer(deps Dependencies) *Server {
 	return &Server{
-		config:                  deps.Config,
-		logger:                  deps.Logger,
-		processTransactionUC:    deps.ProcessTransactionUC,
-		getTransactionHistoryUC: deps.GetTransactionHistoryUC,
-		manageSubscriptionsUC:   deps.ManageSubscriptionsUC,
-		notifyTokenCreationUC:   deps.NotifyTokenCreationUC,
-		processMeteoraEventUC:   deps.ProcessMeteoraEventUC,
-		subscriptionRepo:        deps.SubscriptionRepo,
-		eventStreams:            make(map[string]chan *pb.TransactionEvent),
-		metricsServer:           metrics.NewServer(9091, deps.Logger), // Port 9091 for gRPC server metrics
-		grpcMetrics:             metrics.NewGRPCMetrics(),
+		config:                      deps.Config,
+		logger:                      deps.Logger,
+		processTransactionUC:        deps.ProcessTransactionUC,
+		getTransactionHistoryUC:     deps.GetTransactionHistoryUC,
+		manageSubscriptionsUC:       deps.ManageSubscriptionsUC,
+		notifyTokenCreationUC:       deps.NotifyTokenCreationUC,
+		processMeteoraEventUC:       deps.ProcessMeteoraEventUC,
+		notifyMeteoraPoolCreationUC: deps.NotifyMeteoraPoolCreationUC,
+		subscriptionRepo:            deps.SubscriptionRepo,
+		eventStreams:                make(map[string]chan *pb.TransactionEvent),
 	}
 }
 
@@ -107,15 +114,6 @@ func (s *Server) Start() error {
 	s.grpcServer = grpc.NewServer(grpcOpts...)
 	pb.RegisterSnipingServiceServer(s.grpcServer, s)
 
-	// Start metrics server
-	if err := s.metricsServer.Start(); err != nil {
-		return fmt.Errorf("failed to start metrics server: %w", err)
-	}
-
-	// Initialize metrics
-	s.grpcMetrics.SetHealthStatus(true)
-	s.grpcMetrics.StartUptimeTracker()
-
 	s.logger.Infof("Starting gRPC server on %s", s.config.Address())
 
 	if err := s.grpcServer.Serve(lis); err != nil {
@@ -132,12 +130,6 @@ func (s *Server) Stop() {
 		s.grpcServer.GracefulStop()
 	}
 
-	// Stop metrics server
-	if s.metricsServer != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		s.metricsServer.Stop(ctx)
-	}
 }
 
 // ProcessTransaction handles incoming transaction data from the scanner
@@ -188,21 +180,12 @@ func (s *Server) ProcessTransaction(ctx context.Context, req *pb.ProcessTransact
 
 // ProcessMeteoraEvent handles incoming Meteora pool events from the scanner
 func (s *Server) ProcessMeteoraEvent(ctx context.Context, req *pb.ProcessMeteoraEventRequest) (*pb.ProcessMeteoraEventResponse, error) {
-	startTime := time.Now()
-
-	// Track metrics
-	defer func() {
-		s.grpcMetrics.RecordRequest("ProcessMeteoraEvent", "ok", time.Since(startTime))
-		s.grpcMetrics.RecordMeteoraEvent()
-	}()
 
 	if req.MeteoraEvent == nil {
-		s.grpcMetrics.RecordError("ProcessMeteoraEvent", "invalid_argument")
 		return nil, status.Error(codes.InvalidArgument, "meteora event is required")
 	}
 
 	if req.MeteoraEvent.PoolInfo == nil {
-		s.grpcMetrics.RecordError("ProcessMeteoraEvent", "invalid_argument")
 		return nil, status.Error(codes.InvalidArgument, "pool info is required")
 	}
 
@@ -233,7 +216,6 @@ func (s *Server) ProcessMeteoraEvent(ctx context.Context, req *pb.ProcessMeteora
 	// Execute use case
 	result, err := s.processMeteoraEventUC.Execute(ctx, cmd)
 	if err != nil {
-		s.grpcMetrics.RecordMeteoraError()
 		s.logger.WithError(err).Error("Failed to process Meteora event")
 		return &pb.ProcessMeteoraEventResponse{
 			Success: false,
@@ -241,16 +223,10 @@ func (s *Server) ProcessMeteoraEvent(ctx context.Context, req *pb.ProcessMeteora
 		}, nil
 	}
 
-	// Record successful pool storage
-	if result.IsNew {
-		s.grpcMetrics.RecordMeteoraPoolStored()
-	}
-
 	// Notify Discord about the new pool if it's a new pool creation
 	if result.IsNew && req.MeteoraEvent.EventType == string(domain.MeteoraEventTypePoolCreated) {
 		go func() {
 			s.notifyMeteoraPoolCreation(ctx, req.MeteoraEvent)
-			s.grpcMetrics.RecordMeteoraNotificationSent()
 		}()
 	}
 
@@ -325,14 +301,14 @@ func (s *Server) GetMeteoraPoolHistory(ctx context.Context, req *pb.GetMeteoraPo
 	return &pb.GetMeteoraPoolHistoryResponse{
 		Pools:      pbPools,
 		NextCursor: "",                           // Could implement cursor-based pagination
-		HasMore:    len(pools) == int(req.Limit), // Simple has-more logic
+		HasMore:    len(pools) == int(req.Limit), // Has-more logic
 	}, nil
 }
 
 // SubscribeToMeteoraEvents provides a stream of real-time Meteora events
 func (s *Server) SubscribeToMeteoraEvents(req *pb.SubscribeRequest, stream pb.SnipingService_SubscribeToMeteoraEventsServer) error {
 	// Create event stream for this client
-	eventChan := make(chan *pb.MeteoraEvent, 100)
+	eventChan := make(chan *pb.MeteoraEvent, EventChannelBufferSize)
 	clientID := req.ClientId + "_meteora"
 
 	// Store in a separate map for Meteora events (simplified implementation)
@@ -372,7 +348,7 @@ func (s *Server) SubscribeToTransactions(req *pb.SubscribeRequest, stream pb.Sni
 	}
 
 	// Create event stream for this client
-	eventChan := make(chan *pb.TransactionEvent, 100)
+	eventChan := make(chan *pb.TransactionEvent, EventChannelBufferSize)
 	s.eventStreams[req.ClientId] = eventChan
 
 	// Clean up on disconnect
@@ -509,8 +485,8 @@ func (s *Server) isTokenCreationTransaction(tx *pb.Transaction) bool {
 	// For now, we'll check if the program ID matches known token creation programs
 	// or if the metadata contains token creation indicators
 	tokenPrograms := []string{
-		"TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", // SPL Token Program
-		"11111111111111111111111111111111",            // System Program (can create accounts)
+		SPLTokenProgramID, // SPL Token Program
+		SystemProgramID,   // System Program (can create accounts)
 	}
 
 	for _, program := range tokenPrograms {
@@ -618,11 +594,30 @@ func (s *Server) notifyMeteoraPoolCreation(ctx context.Context, event *pb.Meteor
 		Metadata:          event.PoolInfo.Metadata,
 	}
 
-	// Execute the Discord notification (this would need to be implemented)
-	// For now, we'll just log it since we don't have a direct use case for this
-	s.logger.WithFields(map[string]interface{}{
-		"pool_address": domainEvent.PoolAddress,
-		"token_pair":   domainEvent.GetPairDisplayName(),
-		"creator":      domainEvent.CreatorWallet,
-	}).Info("Meteora pool creation notification sent to Discord successfully")
+	// Execute the Discord notification use case
+	result, err := s.notifyMeteoraPoolCreationUC.ExecuteFromMeteoraEvent(ctx, domainEvent)
+	if err != nil {
+		s.logger.WithError(err).WithFields(map[string]interface{}{
+			"pool_address": domainEvent.PoolAddress,
+			"token_pair":   domainEvent.GetPairDisplayName(),
+			"creator":      domainEvent.CreatorWallet,
+		}).Error("Failed to send Meteora pool creation notification to Discord")
+		return
+	}
+
+	if result.Success {
+		s.logger.WithFields(map[string]interface{}{
+			"pool_address":   domainEvent.PoolAddress,
+			"token_pair":     domainEvent.GetPairDisplayName(),
+			"creator_wallet": domainEvent.CreatorWallet,
+			"event_id":       result.EventID,
+		}).Info("Meteora pool creation notification sent to Discord successfully")
+	} else {
+		s.logger.WithFields(map[string]interface{}{
+			"pool_address": domainEvent.PoolAddress,
+			"token_pair":   domainEvent.GetPairDisplayName(),
+			"creator":      domainEvent.CreatorWallet,
+			"message":      result.Message,
+		}).Warn("Meteora pool creation notification to Discord was not successful")
+	}
 }

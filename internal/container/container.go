@@ -1,6 +1,8 @@
 package container
 
 import (
+	"context"
+
 	"github.com/supesu/sniping-bot-v2/internal/adapters/discord"
 	"github.com/supesu/sniping-bot-v2/internal/adapters/grpc"
 	"github.com/supesu/sniping-bot-v2/internal/infrastructure/events"
@@ -129,14 +131,15 @@ func (c *Container) setupServices() {
 
 	// gRPC Server
 	deps := grpc.Dependencies{
-		Config:                  c.Config,
-		Logger:                  c.Logger,
-		ProcessTransactionUC:    c.ProcessTransactionUC,
-		GetTransactionHistoryUC: c.GetTransactionHistoryUC,
-		ManageSubscriptionsUC:   c.ManageSubscriptionsUC,
-		NotifyTokenCreationUC:   c.NotifyTokenCreationUC,
-		ProcessMeteoraEventUC:   c.ProcessMeteoraEventUC,
-		SubscriptionRepo:        c.SubscriptionRepo,
+		Config:                      c.Config,
+		Logger:                      c.Logger,
+		ProcessTransactionUC:        c.ProcessTransactionUC,
+		GetTransactionHistoryUC:     c.GetTransactionHistoryUC,
+		ManageSubscriptionsUC:       c.ManageSubscriptionsUC,
+		NotifyTokenCreationUC:       c.NotifyTokenCreationUC,
+		ProcessMeteoraEventUC:       c.ProcessMeteoraEventUC,
+		NotifyMeteoraPoolCreationUC: c.NotifyMeteoraPoolCreationUC,
+		SubscriptionRepo:            c.SubscriptionRepo,
 	}
 
 	c.GRPCServer = grpc.NewServer(deps)
@@ -149,24 +152,67 @@ func (c *Container) GetGRPCServer() *grpc.Server {
 	return c.GRPCServer
 }
 
-// GetTransactionRepository returns the transaction repository
-func (c *Container) GetTransactionRepository() domain.TransactionRepository {
-	return c.TransactionRepo
-}
-
-// GetSubscriptionRepository returns the subscription repository
-func (c *Container) GetSubscriptionRepository() domain.SubscriptionRepository {
-	return c.SubscriptionRepo
-}
-
 // GetEventPublisher returns the event publisher
 func (c *Container) GetEventPublisher() domain.EventPublisher {
 	return c.EventPublisher
 }
 
+// StartDiscordBot starts the Discord bot if configured
+func (c *Container) StartDiscordBot(ctx context.Context) error {
+	if c.DiscordRepo == nil {
+		c.Logger.Warn("Discord repository not configured, skipping bot startup")
+		return nil
+	}
+
+	// Type assert to discord.Bot to access Start method
+	if bot, ok := c.DiscordRepo.(*discord.Bot); ok {
+		// Check if bot is already running
+		if bot.IsRunning() {
+			c.Logger.Info("Discord bot is already running")
+			return nil
+		}
+
+		err := bot.Start(ctx)
+		if err != nil {
+			c.Logger.WithError(err).Error("Failed to start Discord bot")
+			return err
+		}
+		c.Logger.Info("Discord bot started successfully")
+		return nil
+	}
+
+	c.Logger.Warn("Discord repository is not a Bot instance, cannot start bot")
+	return nil
+}
+
+// StopDiscordBot stops the Discord bot if running
+func (c *Container) StopDiscordBot() error {
+	if c.DiscordRepo == nil {
+		return nil
+	}
+
+	// Type assert to discord.Bot to access Stop method
+	if bot, ok := c.DiscordRepo.(*discord.Bot); ok {
+		err := bot.Stop()
+		if err != nil {
+			c.Logger.WithError(err).Error("Failed to stop Discord bot")
+			return err
+		}
+		c.Logger.Info("Discord bot stopped successfully")
+		return nil
+	}
+
+	return nil
+}
+
 // Shutdown performs cleanup of container resources
 func (c *Container) Shutdown() {
 	c.Logger.Info("Shutting down container")
+
+	// Stop Discord bot first
+	if err := c.StopDiscordBot(); err != nil {
+		c.Logger.WithError(err).Error("Error stopping Discord bot")
+	}
 
 	if c.GRPCServer != nil {
 		c.GRPCServer.Stop()

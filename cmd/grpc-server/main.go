@@ -56,6 +56,12 @@ func main() {
 		"log_level":   cfg.LogLevel,
 	}).Info("Server configuration loaded")
 
+	// Start Discord bot
+	if err := appContainer.StartDiscordBot(ctx); err != nil {
+		log.WithError(err).Error("Failed to start Discord bot")
+		// Don't exit, continue with server startup
+	}
+
 	if err := server.Start(); err != nil {
 		log.WithError(err).Fatal("Failed to start server")
 	}

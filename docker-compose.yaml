@@ -6,14 +6,14 @@ services:
     container_name: sniping-bot-grpc-server
     ports:
       - "50051:50051"
-      - "9091:9091"  # Metrics port
     env_file:
       - .env
     healthcheck:
-      test: ["CMD-SHELL", "ps aux | grep grpc-server || exit 1"]
+      test: ["CMD-SHELL", "timeout 5 bash -c '</dev/tcp/localhost/50051'"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 10s
     networks:
       - sniping-bot-network
     restart: unless-stopped
@@ -23,8 +23,6 @@ services:
       context: .
       dockerfile: docker/solana-scanner.Dockerfile
     container_name: sniping-bot-solana-scanner
-    ports:
-      - "9092:9092"  # Metrics port
     env_file:
       - .env
     environment:
@@ -34,95 +32,14 @@ services:
     depends_on:
       - grpc-server
     healthcheck:
-      test: ["CMD-SHELL", "ps aux | grep solana-scanner || exit 1"]
+      test: ["CMD-SHELL", "timeout 5 bash -c '</dev/tcp/grpc-server/50051'"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 10s
     networks:
       - sniping-bot-network
     restart: unless-stopped
-
-  # Optional: Redis for caching
-  redis:
-    image: redis:7-alpine
-    container_name: sniping-bot-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - sniping-bot-network
-    restart: unless-stopped
-
-  # Prometheus for metrics collection
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: sniping-bot-prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--storage.tsdb.retention.time=200h'
-      - '--web.enable-lifecycle'
-    networks:
-      - sniping-bot-network
-    restart: unless-stopped
-
-  # Grafana for visualization with Meteora dashboard
-  grafana:
-    image: grafana/grafana:latest
-    container_name: sniping-bot-grafana
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
-      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=SecurePassword123!
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_INSTALL_PLUGINS=grafana-piechart-panel
-    networks:
-      - sniping-bot-network
-    restart: unless-stopped
-    depends_on:
-      - prometheus
-
-  # Node exporter for system metrics
-  node-exporter:
-    image: prom/node-exporter:latest
-    container_name: sniping-bot-node-exporter
-    ports:
-      - "9100:9100"
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /:/rootfs:ro
-    command:
-      - '--path.procfs=/host/proc'
-      - '--path.rootfs=/rootfs'
-      - '--path.sysfs=/host/sys'
-      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
-    networks:
-      - sniping-bot-network
-    restart: unless-stopped
-
-volumes:
-  redis_data:
-  prometheus_data:
-  grafana_data:
 
 networks:
   sniping-bot-network:
