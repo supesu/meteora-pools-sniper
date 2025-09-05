@@ -258,7 +258,7 @@ func (s *MeteoraScanner) processWSLogNotification(msg map[string]interface{}) er
 func (s *MeteoraScanner) logTransactionCounter() {
 	defer s.wg.Done()
 
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
 	var lastTotalCounter int64
