@@ -1,0 +1,63 @@
+environment: development
+log_level: info
+
+grpc:
+  host: 0.0.0.0
+  port: 50051
+  max_recv_size: 4194304  # 4MB
+  max_send_size: 4194304  # 4MB
+  timeout: 30s
+  enable_tls: false
+
+solana:
+  rpc_url: https://api.mainnet-beta.solana.com
+  ws_endpoint: wss://api.mainnet-beta.solana.com
+  program_ids:
+    - LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo  # Meteora Program
+  scan_interval: 1s
+  max_retries: 3
+  retry_delay: 5s
+  confirmation_level: confirmed
+  meteora:
+    enabled: true
+    min_liquidity_threshold: 1000
+    notification_types:
+      - "pool_created"
+    token_metadata_sources:
+      - "jupiter"
+      - "solana-labs"
+    token_metadata_cache_ttl: "1h"
+    quality_filters:
+      require_token_metadata: true
+      block_spam_tokens: true
+      spam_token_patterns:
+        - "TEST"
+        - "FAKE"
+        - "SCAM"
+        - "SPAM"
+      min_liquidity_usd: 100.0
+
+discord:
+  # Discord Bot Token (keep this secret!)
+  bot_token: "YOUR_DISCORD_BOT_TOKEN_HERE"
+
+  # Discord Webhook URL (alternative to bot token)
+  webhook_url: ""
+
+  # Discord Channel ID where notifications will be sent
+  channel_id: "YOUR_DISCORD_CHANNEL_ID_HERE"
+
+  # Discord Guild/Server ID
+  guild_id: "YOUR_DISCORD_GUILD_ID_HERE"
+
+  # Bot display settings
+  username: "Solana Token Sniping Bot"
+  avatar_url: ""
+
+  # Connection settings
+  timeout: 30s
+  max_retries: 3
+  retry_delay: 5s
+
+  # Embed color (hex color without 0x prefix)
+  embed_color: 0x00ff00

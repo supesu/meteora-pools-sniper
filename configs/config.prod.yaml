@@ -1,0 +1,54 @@
+environment: production
+log_level: info
+
+grpc:
+  host: 0.0.0.0
+  port: 50051
+  max_recv_size: 4194304
+  max_send_size: 4194304
+  timeout: 30s
+  enable_tls: true
+  cert_file: /certs/server.crt
+  key_file: /certs/server.key
+
+solana:
+  rpc_url: https://api.mainnet-beta.solana.com
+  ws_endpoint: wss://api.mainnet-beta.solana.com
+  program_ids:
+    - LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo  # Meteora Program
+  scan_interval: 500ms
+  max_retries: 5
+  retry_delay: 2s
+  confirmation_level: finalized
+  meteora:
+    enabled: true
+    min_liquidity_threshold: 5000
+    notification_types:
+      - "pool_created"
+    token_metadata_sources:
+      - "jupiter"
+      - "solana-labs"
+    token_metadata_cache_ttl: "2h"
+    quality_filters:
+      require_token_metadata: true
+      block_spam_tokens: true
+      spam_token_patterns:
+        - "TEST"
+        - "FAKE"
+        - "SCAM"
+        - "SPAM"
+        - "DEAD"
+        - "RUG"
+      min_liquidity_usd: 500.0
+
+discord:
+  bot_token: ${DISCORD_BOT_TOKEN}
+  webhook_url: ${DISCORD_WEBHOOK_URL}
+  channel_id: ${DISCORD_CHANNEL_ID}
+  guild_id: ${DISCORD_GUILD_ID}
+  username: "Solana Token Sniping Bot"
+  avatar_url: ""
+  timeout: 30s
+  max_retries: 3
+  retry_delay: 5s
+  embed_color: 0x00ff00
