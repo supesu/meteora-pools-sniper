@@ -24,21 +24,17 @@ type GRPCConfig struct {
 	MaxRecvSize int    `mapstructure:"max_recv_size"`
 	MaxSendSize int    `mapstructure:"max_send_size"`
 	Timeout     string `mapstructure:"timeout"`
-	EnableTLS   bool   `mapstructure:"enable_tls"`
-	CertFile    string `mapstructure:"cert_file"`
-	KeyFile     string `mapstructure:"key_file"`
 }
 
 // SolanaConfig holds Solana-related configuration
 type SolanaConfig struct {
-	RPC               string        `mapstructure:"rpc_url"`
-	WSEndpoint        string        `mapstructure:"ws_endpoint"`
-	ProgramIDs        []string      `mapstructure:"program_ids"`
-	ScanInterval      string        `mapstructure:"scan_interval"`
-	MaxRetries        int           `mapstructure:"max_retries"`
-	RetryDelay        string        `mapstructure:"retry_delay"`
-	ConfirmationLevel string        `mapstructure:"confirmation_level"`
-	Meteora           MeteoraConfig `mapstructure:"meteora"`
+	RPC          string        `mapstructure:"rpc_url"`
+	WSEndpoint   string        `mapstructure:"ws_endpoint"`
+	ProgramIDs   []string      `mapstructure:"program_ids"`
+	ScanInterval string        `mapstructure:"scan_interval"`
+	MaxRetries   int           `mapstructure:"max_retries"`
+	RetryDelay   string        `mapstructure:"retry_delay"`
+	Meteora      MeteoraConfig `mapstructure:"meteora"`
 }
 
 // MeteoraConfig holds Meteora-specific configuration
@@ -64,7 +60,6 @@ type DiscordConfig struct {
 	BotToken   string `mapstructure:"bot_token"`
 	WebhookURL string `mapstructure:"webhook_url"`
 	ChannelID  string `mapstructure:"channel_id"`
-	GuildID    string `mapstructure:"guild_id"`
 	Username   string `mapstructure:"username"`
 	AvatarURL  string `mapstructure:"avatar_url"`
 	Timeout    string `mapstructure:"timeout"`
@@ -89,7 +84,6 @@ func Load(configPath string) (*Config, error) {
 	v.BindEnv("discord.bot_token", "SNIPING_BOT_DISCORD_BOT_TOKEN")
 	v.BindEnv("discord.webhook_url", "SNIPING_BOT_DISCORD_WEBHOOK_URL")
 	v.BindEnv("discord.channel_id", "SNIPING_BOT_DISCORD_CHANNEL_ID")
-	v.BindEnv("discord.guild_id", "SNIPING_BOT_DISCORD_GUILD_ID")
 	v.BindEnv("discord.username", "SNIPING_BOT_DISCORD_USERNAME")
 	v.BindEnv("discord.avatar_url", "SNIPING_BOT_DISCORD_AVATAR_URL")
 	v.BindEnv("discord.timeout", "SNIPING_BOT_DISCORD_TIMEOUT")
@@ -176,7 +170,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("grpc.max_recv_size", 4*1024*1024) // 4MB
 	v.SetDefault("grpc.max_send_size", 4*1024*1024) // 4MB
 	v.SetDefault("grpc.timeout", "30s")
-	v.SetDefault("grpc.enable_tls", false)
 
 	// Solana
 	v.SetDefault("solana.rpc_url", "https://api.mainnet-beta.solana.com")
@@ -184,7 +177,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("solana.scan_interval", "1s")
 	v.SetDefault("solana.max_retries", 3)
 	v.SetDefault("solana.retry_delay", "5s")
-	v.SetDefault("solana.confirmation_level", "confirmed")
 
 	// Meteora
 	v.SetDefault("solana.meteora.enabled", true)

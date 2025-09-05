@@ -7,9 +7,6 @@ grpc:
   max_recv_size: 4194304
   max_send_size: 4194304
   timeout: 30s
-  enable_tls: true
-  cert_file: /certs/server.crt
-  key_file: /certs/server.key
 
 solana:
   rpc_url: https://api.mainnet-beta.solana.com

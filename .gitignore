@@ -17,6 +17,8 @@ go.work
 # Build artifacts
 bin/
 dist/
+grpc-server
+solana-scanner
 
 # Environment files
 .env
