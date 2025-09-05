@@ -16,22 +16,6 @@ import (
 const (
 	// MeteoraProgram is the main Meteora program ID
 	MeteoraProgram = "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo"
-
-	// DefaultRetryAttempts is the default number of retry attempts for gRPC connections
-	DefaultRetryAttempts = 30
-
-	// RetryDelaySeconds is the delay between retry attempts in seconds
-	RetryDelaySeconds = 2
-
-	// ScanIntervalSeconds is the interval for scanning new transactions
-	ScanIntervalSeconds = 10
-
-	// SOLMint is the Solana SOL token mint address
-	SOLMint = "So11111111111111111111111111111111111112"
-
-	// Instruction names for pool creation
-	InitializeCustomizablePermissionlessLbPair  = "initializeCustomizablePermissionlessLbPair"
-	InitializeCustomizablePermissionlessLbPair2 = "initializeCustomizablePermissionlessLbPair2"
 )
 
 // MeteoraScanner represents a Meteora-specific blockchain scanner
