@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/supesu/sniping-bot-v2/internal/container"
+	"github.com/supesu/sniping-bot-v2/internal"
 	"github.com/supesu/sniping-bot-v2/pkg/config"
 	"github.com/supesu/sniping-bot-v2/pkg/logger"
 )
@@ -27,12 +27,9 @@ func main() {
 	log := logger.New(cfg.LogLevel, cfg.Environment)
 	log.Info("Starting gRPC server...")
 
-	// Create dependency injection container
-	appContainer := container.NewContainer(cfg, log)
-	defer appContainer.Shutdown()
-
-	// Get the configured gRPC server
-	server := appContainer.GetGRPCServer()
+	// Create gRPC server using Wire dependency injection
+	server := internal.InitializeGRPCServer()
+	defer server.Stop()
 
 	// Handle graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -55,12 +52,6 @@ func main() {
 		"environment": cfg.Environment,
 		"log_level":   cfg.LogLevel,
 	}).Info("Server configuration loaded")
-
-	// Start Discord bot
-	if err := appContainer.StartDiscordBot(ctx); err != nil {
-		log.WithError(err).Error("Failed to start Discord bot")
-		// Don't exit, continue with server startup
-	}
 
 	if err := server.Start(); err != nil {
 		log.WithError(err).Fatal("Failed to start server")
