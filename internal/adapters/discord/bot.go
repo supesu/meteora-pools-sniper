@@ -28,6 +28,18 @@ const (
 
 	// HTTPStatusMultipleChoices is the upper bound for successful HTTP status codes
 	HTTPStatusMultipleChoices = 300
+
+	// MaxRetriesDefault is the default maximum number of retries for Discord operations
+	MaxRetriesDefault = 3
+
+	// RetryDelayDefault is the default delay between retry attempts
+	RetryDelayDefault = 5 * time.Second
+
+	// EmbedColorDefault is the default color for Discord embeds
+	EmbedColorDefault = 0x00ff00
+
+	// BotTokenPrefix is the prefix for Discord bot tokens
+	BotTokenPrefix = "Bot "
 )
 
 // Bot represents a Discord bot adapter
@@ -110,12 +122,35 @@ func (b *Bot) SendMeteoraPoolNotification(ctx context.Context, event *domain.Met
 
 // IsHealthy checks if the Discord bot is healthy and can send messages
 func (b *Bot) IsHealthy(ctx context.Context) error {
-	if b.config.WebhookURL == "" && b.config.BotToken == "" {
-		return fmt.Errorf("neither webhook URL nor bot token is configured")
+	if b.config.BotToken == "" && b.config.WebhookURL == "" {
+		return fmt.Errorf("neither bot token nor webhook URL is configured")
 	}
 
-	// For webhook, we can't really test without sending a message
-	// For bot token, we could ping the Discord API, but for simplicity we'll just check config
+	// For now, assume healthy if we have configuration
+	// TODO: Implement proper health checks
+	return nil
+}
+
+// checkSessionHealth performs a health check on the Discord session
+func (b *Bot) checkSessionHealth(ctx context.Context) error {
+	b.mu.RLock()
+	session := b.session
+	isRunning := b.isRunning
+	b.mu.RUnlock()
+
+	b.logger.WithFields(map[string]interface{}{
+		"session_nil": session == nil,
+		"is_running":  isRunning,
+	}).Debug("Discord session health check")
+
+	if session == nil {
+		return fmt.Errorf("bot session is not available")
+	}
+
+	// For now, just check that we have a session
+	// The session should be valid if it was created successfully
+	// TODO: Add more sophisticated health checks later
+
 	return nil
 }
 
@@ -133,7 +168,7 @@ func (b *Bot) Start(ctx context.Context) error {
 	}
 
 	// Create a new Discord session using the provided bot token
-	session, err := discordgo.New("Bot " + b.config.BotToken)
+	session, err := discordgo.New(BotTokenPrefix + b.config.BotToken)
 	if err != nil {
 		return fmt.Errorf("failed to create Discord session: %w", err)
 	}
@@ -148,10 +183,15 @@ func (b *Bot) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to open Discord connection: %w", err)
 	}
 
+	// Set session and running state only after successful connection
 	b.session = session
 	b.isRunning = true
 
-	b.logger.Info("Discord bot started successfully")
+	b.logger.WithFields(map[string]interface{}{
+		"session_state": "connected",
+		"data_ready":    session.DataReady,
+	}).Info("Discord bot started successfully")
+
 	return nil
 }
 
@@ -183,23 +223,46 @@ func (b *Bot) Stop() error {
 func (b *Bot) IsRunning() bool {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	return b.isRunning
+	isRunning := b.isRunning
+	b.logger.WithFields(map[string]interface{}{
+		"is_running":  isRunning,
+		"has_session": b.session != nil,
+	}).Debug("Checking if Discord bot is running")
+	return isRunning
 }
 
 // onReady is called when the bot successfully connects to Discord
 func (b *Bot) onReady(s *discordgo.Session, event *discordgo.Ready) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Ensure the running state is properly set
+	b.isRunning = true
+
 	b.logger.WithFields(map[string]interface{}{
 		"username":      event.User.Username,
 		"discriminator": event.User.Discriminator,
 		"guilds":        len(event.Guilds),
+		"session_id":    event.SessionID,
+		"data_ready":    s.DataReady,
 	}).Info("Discord bot is ready and online")
 }
 
 // onDisconnect is called when the bot disconnects from Discord
 func (b *Bot) onDisconnect(s *discordgo.Session, event *discordgo.Disconnect) {
-	b.logger.Warn("Discord bot disconnected")
-	// The discordgo library handles reconnection automatically
-	// We don't need to manually restart here
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Mark as not running when disconnected
+	b.isRunning = false
+
+	b.logger.WithFields(map[string]interface{}{
+		"reason":            "disconnected from Discord gateway",
+		"is_running_set_to": false,
+	}).Warn("Discord bot disconnected")
+
+	// Note: The discordgo library handles reconnection automatically
+	// When it reconnects, onReady will be called again and we'll set isRunning = true
 }
 
 // createTokenCreationEmbed creates a Discord embed for token creation events
@@ -421,46 +484,73 @@ func (b *Bot) createMeteoraPoolEmbed(event *domain.MeteoraPoolEvent) DiscordEmbe
 	return embed
 }
 
-// sendMessage sends a message to Discord using webhook or bot API
+// sendMessage sends a message to Discord using bot API or webhook as fallback
 func (b *Bot) sendMessage(ctx context.Context, message DiscordMessage) error {
 	var err error
 
-	for attempt := 1; attempt <= b.config.MaxRetries; attempt++ {
-		if b.config.WebhookURL != "" {
-			err = b.sendWebhookMessage(ctx, message)
-		} else if b.config.BotToken != "" {
-			err = b.sendBotMessage(ctx, message)
+	maxRetries := b.config.MaxRetries
+	if maxRetries == 0 {
+		maxRetries = MaxRetriesDefault
+	}
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		var sendErr error
+
+		// Prioritize bot API (gateway connection) over webhooks
+		if b.config.BotToken != "" {
+			sendErr = b.sendBotMessage(ctx, message)
+		} else if b.config.WebhookURL != "" {
+			sendErr = b.sendWebhookMessage(ctx, message)
 		} else {
-			return fmt.Errorf("no Discord webhook URL or bot token configured")
+			return fmt.Errorf("no Discord bot token or webhook URL configured")
 		}
 
-		if err == nil {
+		if sendErr == nil {
 			return nil
 		}
 
-		if attempt < b.config.MaxRetries {
+		// Log the error with context
+		b.logger.WithFields(map[string]interface{}{
+			"attempt":     attempt,
+			"max_retries": maxRetries,
+			"method":      b.getSendMethod(),
+			"error":       sendErr.Error(),
+		}).Warn("Failed to send Discord message")
+
+		if attempt < maxRetries {
 			retryDelay, parseErr := time.ParseDuration(b.config.RetryDelay)
 			if parseErr != nil {
-				retryDelay = 5 * time.Second
+				retryDelay = RetryDelayDefault
 			}
 
 			b.logger.WithFields(map[string]interface{}{
 				"attempt":     attempt,
-				"max_retries": b.config.MaxRetries,
 				"retry_delay": retryDelay.String(),
-				"error":       err.Error(),
-			}).Warn("Failed to send Discord message, retrying...")
+			}).Info("Retrying Discord message send after delay")
 
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return fmt.Errorf("context cancelled while retrying: %w", ctx.Err())
 			case <-time.After(retryDelay):
 				continue
 			}
 		}
+
+		// Final attempt failed
+		return fmt.Errorf("failed to send Discord message after %d attempts: %w", maxRetries, sendErr)
 	}
 
-	return fmt.Errorf("failed to send Discord message after %d attempts: %w", b.config.MaxRetries, err)
+	return fmt.Errorf("failed to send Discord message after %d attempts: %w", maxRetries, err)
+}
+
+// getSendMethod returns a string indicating which send method is being used
+func (b *Bot) getSendMethod() string {
+	if b.config.BotToken != "" {
+		return "bot_api"
+	} else if b.config.WebhookURL != "" {
+		return "webhook"
+	}
+	return "unknown"
 }
 
 // sendWebhookMessage sends a message using Discord webhook
@@ -568,7 +658,7 @@ func (b *Bot) sendBotMessageHTTP(ctx context.Context, message DiscordMessage) er
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("Bot %s", b.config.BotToken))
+	req.Header.Set("Authorization", fmt.Sprintf("%s%s", BotTokenPrefix, b.config.BotToken))
 
 	resp, err := b.httpClient.Do(req)
 	if err != nil {

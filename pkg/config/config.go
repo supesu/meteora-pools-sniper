@@ -98,6 +98,8 @@ func Load(configPath string) (*Config, error) {
 	v.BindEnv("discord.embed_color", "SNIPING_BOT_DISCORD_EMBED_COLOR")
 
 	// Bind Solana configuration
+	v.BindEnv("solana.rpc_url", "SNIPING_BOT_SOLANA_RPC_URL")
+	v.BindEnv("solana.ws_endpoint", "SNIPING_BOT_SOLANA_WS_ENDPOINT")
 	v.BindEnv("solana.program_ids", "SNIPING_BOT_SOLANA_PROGRAM_IDS")
 
 	// Bind Meteora configuration

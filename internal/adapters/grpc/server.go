@@ -167,7 +167,13 @@ func (s *Server) ProcessTransaction(ctx context.Context, req *pb.ProcessTransact
 
 		// Check if this is a token creation transaction and notify Discord
 		if s.isTokenCreationTransaction(req.Transaction) {
-			go s.notifyTokenCreation(ctx, req.Transaction)
+			go func() {
+				// Create a new context with longer timeout for Discord notifications
+				// Discord notifications don't need to be tied to the original gRPC request timeout
+				notificationCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				defer cancel()
+				s.notifyTokenCreation(notificationCtx, req.Transaction)
+			}()
 		}
 	}
 
@@ -226,7 +232,11 @@ func (s *Server) ProcessMeteoraEvent(ctx context.Context, req *pb.ProcessMeteora
 	// Notify Discord about the new pool if it's a new pool creation
 	if result.IsNew && req.MeteoraEvent.EventType == string(domain.MeteoraEventTypePoolCreated) {
 		go func() {
-			s.notifyMeteoraPoolCreation(ctx, req.MeteoraEvent)
+			// Create a new context with longer timeout for Discord notifications
+			// Discord notifications don't need to be tied to the original gRPC request timeout
+			notificationCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			s.notifyMeteoraPoolCreation(notificationCtx, req.MeteoraEvent)
 		}()
 	}
 

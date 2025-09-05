@@ -27,6 +27,28 @@ func main() {
 	log := logger.New(cfg.LogLevel, cfg.Environment)
 	log.Info("Starting gRPC server...")
 
+	// Initialize Discord bot
+	discordBot := internal.InitializeDiscordBot()
+
+	// Start Discord bot
+	if cfg.Discord.BotToken != "" && cfg.Discord.BotToken != "YOUR_DISCORD_BOT_TOKEN_HERE" {
+		log.Info("Starting Discord bot...")
+		botCtx := context.Background()
+		if err := discordBot.Start(botCtx); err != nil {
+			log.WithError(err).Error("Failed to start Discord bot")
+			// Continue with server startup even if Discord bot fails
+		} else {
+			log.Info("Discord bot started successfully")
+			defer func() {
+				if err := discordBot.Stop(); err != nil {
+					log.WithError(err).Error("Failed to stop Discord bot")
+				}
+			}()
+		}
+	} else {
+		log.Warn("Discord bot token not configured, skipping bot startup")
+	}
+
 	// Create gRPC server using Wire dependency injection
 	server := internal.InitializeGRPCServer()
 	defer server.Stop()

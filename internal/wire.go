@@ -86,3 +86,14 @@ func InitializeGRPCServer() *grpc.Server {
 	)
 	return nil
 }
+
+// InitializeDiscordBot creates and returns the Discord bot instance
+func InitializeDiscordBot() *discord.Bot {
+	wire.Build(
+		discord.NewBot,
+		ProvideConfig,
+		ProvideDiscordConfig,
+		ProvideLogger,
+	)
+	return nil
+}

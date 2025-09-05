@@ -41,6 +41,15 @@ func InitializeGRPCServer() *grpc.Server {
 	return server
 }
 
+// InitializeDiscordBot creates and returns the Discord bot instance
+func InitializeDiscordBot() *discord.Bot {
+	config := ProvideConfig()
+	discordConfig := ProvideDiscordConfig(config)
+	logger := ProvideLogger(config)
+	bot := discord.NewBot(discordConfig, logger)
+	return bot
+}
+
 // wire.go:
 
 // ApplicationSet provides the complete application dependency set

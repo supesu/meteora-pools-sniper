@@ -39,16 +39,18 @@ solana:
 
 discord:
   # Discord Bot Token (keep this secret!)
+  # Get this from: https://discord.com/developers/applications
   bot_token: "YOUR_DISCORD_BOT_TOKEN_HERE"
 
   # Discord Webhook URL (alternative to bot token)
   webhook_url: ""
 
   # Discord Channel ID where notifications will be sent
+  # Right-click on the channel and select "Copy ID" (requires Developer Mode)
   channel_id: "YOUR_DISCORD_CHANNEL_ID_HERE"
 
-  # Discord Guild/Server ID
-  guild_id: "YOUR_DISCORD_GUILD_ID_HERE"
+  # Discord Guild/Server ID (optional, for advanced features)
+  guild_id: ""
 
   # Bot display settings
   username: "Solana Token Sniping Bot"
