@@ -9,6 +9,11 @@ import (
 	"github.com/supesu/sniping-bot-v2/pkg/logger"
 )
 
+const (
+	// ProcessingMinLiquidityThreshold is the default minimum liquidity threshold for pool processing
+	ProcessingMinLiquidityThreshold = 1000
+)
+
 // ProcessMeteoraEventUseCase orchestrates the Meteora pool event processing business rules
 type ProcessMeteoraEventUseCase struct {
 	meteoraRepo    domain.MeteoraRepository
@@ -218,7 +223,7 @@ func (uc *ProcessMeteoraEventUseCase) passesQualityFilters(event *domain.Meteora
 
 	// Business Rule: Require minimum liquidity (if available)
 	// This could be configured via settings
-	minLiquidityThreshold := uint64(1000) // Example threshold
+	minLiquidityThreshold := uint64(ProcessingMinLiquidityThreshold) // Example threshold
 	if !event.IsSignificantLiquidity(minLiquidityThreshold) {
 		uc.logger.WithFields(map[string]interface{}{
 			"pool_address":        event.PoolAddress,

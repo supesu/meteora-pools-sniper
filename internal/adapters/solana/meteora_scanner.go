@@ -21,6 +21,24 @@ import (
 const (
 	// MeteoraProgram is the main Meteora program ID
 	MeteoraProgram = "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo"
+
+	// DefaultRetryAttempts is the default number of retry attempts for gRPC connections
+	DefaultRetryAttempts = 30
+
+	// RetryDelaySeconds is the delay between retry attempts in seconds
+	RetryDelaySeconds = 2
+
+	// MockEventIntervalSeconds is the interval for generating mock events in seconds
+	MockEventIntervalSeconds = 30
+
+	// MockEventTimeoutSeconds is the timeout for mock event processing
+	MockEventTimeoutSeconds = 10
+
+	// SOLMint is the Solana SOL token mint address
+	SOLMint = "So11111111111111111111111111111111111112"
+
+	// DefaultFeeRate is the default fee rate for mock pools
+	DefaultFeeRate = 25
 )
 
 // MeteoraScanner represents a Meteora-specific blockchain scanner
@@ -107,8 +125,8 @@ func (s *MeteoraScanner) Wait() {
 
 // connectToGRPCServer establishes connection to the gRPC server with retry logic
 func (s *MeteoraScanner) connectToGRPCServer() error {
-	maxRetries := 30
-	retryDelay := 2 * time.Second
+	maxRetries := DefaultRetryAttempts
+	retryDelay := RetryDelaySeconds * time.Second
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		s.logger.WithField("attempt", attempt).Info("Attempting to connect to gRPC server...")
@@ -157,7 +175,7 @@ func (s *MeteoraScanner) generateMockEvents() {
 
 	s.logger.Info("Starting mock Meteora pool event generation...")
 
-	ticker := time.NewTicker(30 * time.Second) // Generate an event every 30 seconds
+	ticker := time.NewTicker(MockEventIntervalSeconds * time.Second) // Generate an event every 30 seconds
 	defer ticker.Stop()
 
 	counter := 1
@@ -191,7 +209,7 @@ func (s *MeteoraScanner) generateMockPoolEvent(counter int) {
 	// Create mock pool event
 	poolEvent := &domain.MeteoraPoolEvent{
 		PoolAddress:       fmt.Sprintf("MockPool%d", counter),
-		TokenAMint:        "So11111111111111111111111111111111111112",     // SOL mint
+		TokenAMint:        SOLMint,                                        // SOL mint
 		TokenBMint:        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC mint
 		TokenASymbol:      "SOL",
 		TokenBSymbol:      "USDC",
@@ -201,7 +219,7 @@ func (s *MeteoraScanner) generateMockPoolEvent(counter int) {
 		PoolType:          "Permissionless",
 		InitialLiquidityA: uint64(1000000 * counter),   // Variable SOL amount
 		InitialLiquidityB: uint64(100000000 * counter), // Variable USDC amount
-		FeeRate:           25,                          // 0.25%
+		FeeRate:           DefaultFeeRate,              // 0.25%
 		TransactionHash:   signature,
 		CreatedAt:         startTime,
 		Slot:              slot,
@@ -220,7 +238,7 @@ func (s *MeteoraScanner) generateMockPoolEvent(counter int) {
 
 // sendMeteoraEventToGRPC sends a Meteora event to the gRPC server
 func (s *MeteoraScanner) sendMeteoraEventToGRPC(event *domain.MeteoraPoolEvent) {
-	ctx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(s.ctx, MockEventTimeoutSeconds*time.Second)
 	defer cancel()
 
 	// Convert domain event to protobuf message

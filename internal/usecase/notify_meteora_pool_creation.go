@@ -9,6 +9,14 @@ import (
 	"github.com/supesu/sniping-bot-v2/pkg/logger"
 )
 
+const (
+	// DefaultMinLiquidityThreshold is the default minimum liquidity threshold for pool notifications
+	DefaultMinLiquidityThreshold = 1000
+
+	// DefaultMaxNotificationAge is the default maximum age for pool notifications
+	DefaultMaxNotificationAge = 10 * time.Minute
+)
+
 // NotifyMeteoraPoolCreationUseCase orchestrates the Meteora pool creation notification business rules
 type NotifyMeteoraPoolCreationUseCase struct {
 	discordRepo domain.DiscordNotificationRepository
@@ -161,7 +169,7 @@ func (uc *NotifyMeteoraPoolCreationUseCase) shouldNotify(event *domain.MeteoraPo
 	}
 
 	// Business Rule: Require minimum liquidity (configurable threshold)
-	minLiquidityThreshold := uint64(1000) // This should come from configuration
+	minLiquidityThreshold := uint64(DefaultMinLiquidityThreshold) // This should come from configuration
 	if !event.IsSignificantLiquidity(minLiquidityThreshold) {
 		uc.logger.WithFields(map[string]interface{}{
 			"pool_address":        event.PoolAddress,
@@ -173,7 +181,7 @@ func (uc *NotifyMeteoraPoolCreationUseCase) shouldNotify(event *domain.MeteoraPo
 	}
 
 	// Business Rule: Check pool age (don't notify about old pools)
-	maxAge := 10 * time.Minute
+	maxAge := DefaultMaxNotificationAge
 	if event.Age() > maxAge {
 		uc.logger.WithFields(map[string]interface{}{
 			"pool_address": event.PoolAddress,

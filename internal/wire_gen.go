@@ -64,11 +64,6 @@ func ProvideConfig() *config.Config {
 	return cfg
 }
 
-// ProvideEventPublisher creates an event publisher instance
-func ProvideEventPublisher(log logger.Logger) domain.EventPublisher {
-	return events.NewMemoryEventPublisher(log)
-}
-
 // ProvideDiscordConfig extracts Discord config from main config
 func ProvideDiscordConfig(cfg *config.Config) *config.DiscordConfig {
 	return &cfg.Discord
