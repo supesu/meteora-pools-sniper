@@ -33,8 +33,9 @@ type MeteoraScanner struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	lastEventTime time.Time
-	txCounter     int64
+	lastEventTime  time.Time
+	txCounter      int64
+	totalTxCounter int64
 }
 
 // NewMeteoraScanner creates a new Meteora-specific scanner instance
@@ -58,6 +59,7 @@ func NewMeteoraScanner(cfg *config.Config, log logger.Logger) *MeteoraScanner {
 		cancel:               cancel,
 		lastEventTime:        time.Now(),
 		txCounter:            0,
+		totalTxCounter:       0,
 	}
 }
 
@@ -198,6 +200,9 @@ func (s *MeteoraScanner) processWSLogNotification(msg map[string]interface{}) er
 		return fmt.Errorf("invalid logs in notification")
 	}
 
+	// Count this transaction in total
+	atomic.AddInt64(&s.totalTxCounter, 1)
+
 	// Check if any log indicates pool creation
 	for _, logInterface := range logs {
 		log, ok := logInterface.(string)
@@ -206,9 +211,12 @@ func (s *MeteoraScanner) processWSLogNotification(msg map[string]interface{}) er
 		}
 
 		if s.transactionProcessor.IsPoolCreationLog(log) {
+			s.logger.WithField("log", log).Info("Found pool creation log")
+
 			// Extract signature from the notification
 			signatureStr, ok := value["signature"].(string)
 			if !ok {
+				s.logger.Error("No signature found in notification")
 				continue
 			}
 
@@ -220,6 +228,7 @@ func (s *MeteoraScanner) processWSLogNotification(msg map[string]interface{}) er
 
 			slotFloat, ok := value["slot"].(float64)
 			if !ok {
+				s.logger.Error("No slot found in notification")
 				continue
 			}
 			slot := uint64(slotFloat)
@@ -227,7 +236,6 @@ func (s *MeteoraScanner) processWSLogNotification(msg map[string]interface{}) er
 			// Process the transaction
 			event, err := s.transactionProcessor.ProcessTransactionBySignature(s.ctx, s.solanaClient.GetRPCClient(), signature, slot)
 			if err != nil {
-				s.logger.WithError(err).WithField("signature", signatureStr).Error("Failed to process transaction")
 				continue
 			}
 
@@ -250,19 +258,40 @@ func (s *MeteoraScanner) processWSLogNotification(msg map[string]interface{}) er
 func (s *MeteoraScanner) logTransactionCounter() {
 	defer s.wg.Done()
 
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
+
+	var lastTotalCounter int64
+	var lastPoolCounter int64
+	lastTime := time.Now()
 
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
 		case <-ticker.C:
-			counter := atomic.LoadInt64(&s.txCounter)
+			currentTotalCounter := atomic.LoadInt64(&s.totalTxCounter)
+			currentPoolCounter := atomic.LoadInt64(&s.txCounter)
+			currentTime := time.Now()
+
+			// Calculate rates (transactions per second)
+			timeDiff := currentTime.Sub(lastTime).Seconds()
+			totalTxDiff := currentTotalCounter - lastTotalCounter
+			poolTxDiff := currentPoolCounter - lastPoolCounter
+			totalRate := float64(totalTxDiff) / timeDiff
+			poolRate := float64(poolTxDiff) / timeDiff
+
 			s.logger.WithFields(map[string]interface{}{
-				"total_processed": counter,
+				"tx_per_sec":      fmt.Sprintf("%.2f", totalRate),
+				"pool_tx_per_sec": fmt.Sprintf("%.2f", poolRate),
+				"total_scanned":   currentTotalCounter,
+				"pool_processed":  currentPoolCounter,
 				"scanner_id":      s.scannerID,
-			}).Info("Transaction processing stats")
+			}).Info("Transaction processing rate")
+
+			lastTotalCounter = currentTotalCounter
+			lastPoolCounter = currentPoolCounter
+			lastTime = currentTime
 		}
 	}
 }

@@ -80,6 +80,10 @@ func Load(configPath string) (*Config, error) {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.SetEnvPrefix("SNIPING_BOT")
 
+	// Explicitly bind log level
+	v.BindEnv("log_level", "SNIPING_BOT_LOG_LEVEL")
+	v.BindEnv("environment", "SNIPING_BOT_ENVIRONMENT")
+
 	// Explicitly bind environment variables to ensure they're read correctly
 	v.BindEnv("discord.bot_token", "SNIPING_BOT_DISCORD_BOT_TOKEN")
 	v.BindEnv("discord.webhook_url", "SNIPING_BOT_DISCORD_WEBHOOK_URL")
