@@ -14,7 +14,6 @@ import (
 type DiscordClient struct {
 	config            *config.DiscordConfig
 	logger            logger.Logger
-	session           *discordgo.Session
 	isRunning         bool
 	mu                sync.RWMutex
 	connectionManager *DiscordConnectionManager
@@ -80,24 +79,6 @@ func (c *DiscordClient) IsRunning() bool {
 // GetSession returns the Discord session
 func (c *DiscordClient) GetSession() *discordgo.Session {
 	return c.connectionManager.GetSession()
-}
-
-// onReady handles the ready event
-func (c *DiscordClient) onReady(s *discordgo.Session, event *discordgo.Ready) {
-	c.logger.WithFields(map[string]interface{}{
-		"username":      event.User.Username,
-		"discriminator": event.User.Discriminator,
-		"guilds":        len(event.Guilds),
-	}).Info("Discord bot is ready")
-}
-
-// onDisconnect handles disconnection events
-func (c *DiscordClient) onDisconnect(s *discordgo.Session, event *discordgo.Disconnect) {
-	c.mu.Lock()
-	c.isRunning = false
-	c.mu.Unlock()
-
-	c.logger.Warn("Discord bot disconnected")
 }
 
 // CheckHealth performs a health check

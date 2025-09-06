@@ -66,7 +66,7 @@ func (s *MessageSender) getSendMethod() string {
 // sendBotMessage sends a message using the Discord bot API
 func (s *MessageSender) sendBotMessage(ctx context.Context, message DiscordMessage) error {
 	if s.session == nil {
-		return fmt.Errorf("Discord session not available")
+		return fmt.Errorf("discord session not available")
 	}
 
 	if s.config.ChannelID == "" {
@@ -132,44 +132,6 @@ func (s *MessageSender) sendWebhookMessage(ctx context.Context, message DiscordM
 
 	if resp.StatusCode < HTTPStatusOK || resp.StatusCode >= HTTPStatusMultipleChoices {
 		return fmt.Errorf("webhook request failed with status: %d", resp.StatusCode)
-	}
-
-	return nil
-}
-
-// sendBotMessageHTTP sends a message using Discord's HTTP API directly
-func (s *MessageSender) sendBotMessageHTTP(ctx context.Context, message DiscordMessage) error {
-	if s.config.BotToken == "" {
-		return fmt.Errorf("bot token not configured")
-	}
-
-	if s.config.ChannelID == "" {
-		return fmt.Errorf("channel ID not configured")
-	}
-
-	url := fmt.Sprintf("https://discord.com/api/v10/channels/%s/messages", s.config.ChannelID)
-
-	messageJSON, err := json.Marshal(message)
-	if err != nil {
-		return fmt.Errorf("failed to marshal message: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(messageJSON))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", BotTokenPrefix+s.config.BotToken)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send HTTP request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < HTTPStatusOK || resp.StatusCode >= HTTPStatusMultipleChoices {
-		return fmt.Errorf("HTTP request failed with status: %d", resp.StatusCode)
 	}
 
 	return nil

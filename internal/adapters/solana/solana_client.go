@@ -2,7 +2,6 @@ package solana
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/gagliardetto/solana-go"
@@ -19,8 +18,6 @@ type SolanaClient struct {
 	logger    logger.Logger
 	rpcClient *rpc.Client
 
-	wsConn              *websocket.Conn
-	wsMu                sync.Mutex
 	wsDialer            *websocket.Dialer
 	wsConnectionManager *WebSocketConnectionManager
 

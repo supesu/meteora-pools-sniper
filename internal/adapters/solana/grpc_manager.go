@@ -75,7 +75,7 @@ func (m *GRPCConnectionManager) connectGRPC(ctx context.Context) error {
 
 	m.logger.WithField("address", m.address).Info("Connecting to gRPC server...")
 
-	conn, err := grpc.Dial(
+	conn, err := grpc.NewClient(
 		m.address,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)

@@ -119,7 +119,7 @@ func (m *DiscordConnectionManager) checkDiscordHealth(ctx context.Context) error
 	m.mu.RUnlock()
 
 	if session == nil {
-		return fmt.Errorf("Discord session is nil")
+		return fmt.Errorf("discord session is nil")
 	}
 
 	// Try to get current user to verify connection
