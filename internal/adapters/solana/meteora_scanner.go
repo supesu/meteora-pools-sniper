@@ -9,22 +9,66 @@ import (
 	"time"
 
 	"github.com/gagliardetto/solana-go"
+	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/supesu/sniping-bot-v2/pkg/config"
+	"github.com/supesu/sniping-bot-v2/pkg/domain"
 	"github.com/supesu/sniping-bot-v2/pkg/logger"
 )
+
+// SolanaClientInterface defines the interface for Solana client operations
+type SolanaClientInterface interface {
+	ConnectRPC() error
+	ConnectWebSocket() error
+	GetRPCClient() *rpc.Client
+	SubscribeToProgramLogs(programID solana.PublicKey) error
+	ReadWebSocketMessage() ([]byte, error)
+	Stop()
+}
+
+// GRPCPublisherInterface defines the interface for gRPC publishing operations
+type GRPCPublisherInterface interface {
+	Connect() error
+	PublishMeteoraEvent(ctx context.Context, event *domain.MeteoraPoolEvent) error
+	Close() error
+	IsConnected() bool
+}
+
+// TransactionProcessorInterface defines the interface for transaction processing operations
+type TransactionProcessorInterface interface {
+	IsPoolCreationLog(log string) bool
+	ProcessTransactionBySignature(ctx context.Context, rpcClient interface{}, signature solana.Signature, slot uint64) (*domain.MeteoraPoolEvent, error)
+}
 
 const (
 	// MeteoraProgram is the main Meteora program ID
 	MeteoraProgram = "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo"
+
+	// WebSocketReconnectDelay is the delay before retrying WebSocket connection
+	WebSocketReconnectDelay = 10 * time.Second
+
+	// HealthCheckTimeout is the timeout for health checks
+	HealthCheckTimeout = 5 * time.Second
+
+	// TransactionRateInterval is the interval for logging transaction rates
+	TransactionRateInterval = 5 * time.Minute
+
+	// MaxInactiveTime is the maximum time without events before health check fails
+	MaxInactiveTime = 2 * time.Minute
 )
+
+// NotificationData holds extracted WebSocket notification data
+type NotificationData struct {
+	Signature solana.Signature
+	Slot      uint64
+}
 
 // MeteoraScanner represents a Meteora-specific blockchain scanner
 type MeteoraScanner struct {
 	config               *config.Config
 	logger               logger.Logger
-	solanaClient         *SolanaClient
-	grpcPublisher        *GRPCPublisher
-	transactionProcessor *TransactionProcessor
+	solanaClient         SolanaClientInterface
+	grpcPublisher        GRPCPublisherInterface
+	transactionProcessor TransactionProcessorInterface
 
 	meteoraProgram solana.PublicKey
 	scannerID      string
@@ -53,6 +97,37 @@ func NewMeteoraScanner(cfg *config.Config, log logger.Logger) *MeteoraScanner {
 		solanaClient:         NewSolanaClient(cfg, log),
 		grpcPublisher:        NewGRPCPublisher(cfg, log),
 		transactionProcessor: NewTransactionProcessor(log),
+		scannerID:            fmt.Sprintf("meteora-scanner-%d", time.Now().Unix()),
+		meteoraProgram:       meteoraProgram,
+		ctx:                  ctx,
+		cancel:               cancel,
+		lastEventTime:        time.Now(),
+		txCounter:            0,
+		totalTxCounter:       0,
+	}
+}
+
+// NewMeteoraScannerWithDeps creates a new Meteora scanner with custom dependencies (for testing)
+func NewMeteoraScannerWithDeps(
+	cfg *config.Config,
+	log logger.Logger,
+	solanaClient SolanaClientInterface,
+	grpcPublisher GRPCPublisherInterface,
+	transactionProcessor TransactionProcessorInterface,
+) *MeteoraScanner {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	meteoraProgram, err := solana.PublicKeyFromBase58(MeteoraProgram)
+	if err != nil {
+		log.WithError(err).Fatal("Invalid Meteora program ID")
+	}
+
+	return &MeteoraScanner{
+		config:               cfg,
+		logger:               log,
+		solanaClient:         solanaClient,
+		grpcPublisher:        grpcPublisher,
+		transactionProcessor: transactionProcessor,
 		scannerID:            fmt.Sprintf("meteora-scanner-%d", time.Now().Unix()),
 		meteoraProgram:       meteoraProgram,
 		ctx:                  ctx,
@@ -136,7 +211,7 @@ func (s *MeteoraScanner) monitorProgramLogsWS() {
 				select {
 				case <-s.ctx.Done():
 					return
-				case <-time.After(10 * time.Second):
+				case <-time.After(WebSocketReconnectDelay):
 					continue
 				}
 			}
@@ -203,21 +278,78 @@ func (s *MeteoraScanner) handleWSMessage(message []byte) error {
 	return nil
 }
 
-// processWSLogNotification processes WebSocket log notifications
-func (s *MeteoraScanner) processWSLogNotification(msg map[string]interface{}) error {
+// extractNotificationData extracts signature and slot from WebSocket notification
+func (s *MeteoraScanner) extractNotificationData(value map[string]interface{}) (*NotificationData, error) {
+	// Extract signature from the notification
+	signatureStr, ok := value["signature"].(string)
+	if !ok {
+		return nil, fmt.Errorf("no signature found in notification")
+	}
+
+	signature, err := solana.SignatureFromBase58(signatureStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse signature: %w", err)
+	}
+
+	slotFloat, ok := value["slot"].(float64)
+	if !ok {
+		return nil, fmt.Errorf("no slot found in notification")
+	}
+	slot := uint64(slotFloat)
+
+	return &NotificationData{
+		Signature: signature,
+		Slot:      slot,
+	}, nil
+}
+
+// validateNotificationParams validates the structure of WebSocket notification
+func (s *MeteoraScanner) validateNotificationParams(msg map[string]interface{}) (map[string]interface{}, error) {
 	params, ok := msg["params"].(map[string]interface{})
 	if !ok {
-		return fmt.Errorf("invalid notification params")
+		return nil, fmt.Errorf("invalid notification params")
 	}
 
 	result, ok := params["result"].(map[string]interface{})
 	if !ok {
-		return fmt.Errorf("invalid notification result")
+		return nil, fmt.Errorf("invalid notification result")
 	}
 
 	value, ok := result["value"].(map[string]interface{})
 	if !ok {
-		return fmt.Errorf("invalid notification value")
+		return nil, fmt.Errorf("invalid notification value")
+	}
+
+	return value, nil
+}
+
+// processPoolCreation handles pool creation transaction processing
+func (s *MeteoraScanner) processPoolCreation(signature solana.Signature, slot uint64) error {
+	// Process the transaction
+	event, err := s.transactionProcessor.ProcessTransactionBySignature(s.ctx, s.solanaClient.GetRPCClient(), signature, slot)
+	if err != nil {
+		return fmt.Errorf("failed to process transaction: %w", err)
+	}
+
+	if event != nil {
+		atomic.AddInt64(&s.txCounter, 1)
+		s.lastEventTime = time.Now()
+
+		// Publish the event
+		if err := s.grpcPublisher.PublishMeteoraEvent(s.ctx, event); err != nil {
+			s.logger.WithError(err).Error("Failed to publish Meteora event")
+		}
+	}
+
+	return nil
+}
+
+// processWSLogNotification processes WebSocket log notifications
+func (s *MeteoraScanner) processWSLogNotification(msg map[string]interface{}) error {
+	// Validate and extract notification parameters
+	value, err := s.validateNotificationParams(msg)
+	if err != nil {
+		return err
 	}
 
 	logs, ok := value["logs"].([]interface{})
@@ -238,40 +370,18 @@ func (s *MeteoraScanner) processWSLogNotification(msg map[string]interface{}) er
 		if s.transactionProcessor.IsPoolCreationLog(log) {
 			s.logger.WithField("log", log).Info("Found pool creation log")
 
-			// Extract signature from the notification
-			signatureStr, ok := value["signature"].(string)
-			if !ok {
-				s.logger.Error("No signature found in notification")
-				continue
-			}
-
-			signature, err := solana.SignatureFromBase58(signatureStr)
+			// Extract notification data
+			data, err := s.extractNotificationData(value)
 			if err != nil {
-				s.logger.WithError(err).Error("Failed to parse signature")
+				s.logger.WithError(err).Error("Failed to extract notification data")
 				continue
 			}
 
-			slotFloat, ok := value["slot"].(float64)
-			if !ok {
-				s.logger.Error("No slot found in notification")
-				continue
-			}
-			slot := uint64(slotFloat)
-
-			// Process the transaction
-			event, err := s.transactionProcessor.ProcessTransactionBySignature(s.ctx, s.solanaClient.GetRPCClient(), signature, slot)
-			if err != nil {
-				continue
+			// Process the pool creation
+			if err := s.processPoolCreation(data.Signature, data.Slot); err != nil {
+				s.logger.WithError(err).Error("Failed to process pool creation")
 			}
 
-			if event != nil {
-				atomic.AddInt64(&s.txCounter, 1)
-
-				// Publish the event
-				if err := s.grpcPublisher.PublishMeteoraEvent(s.ctx, event); err != nil {
-					s.logger.WithError(err).Error("Failed to publish Meteora event")
-				}
-			}
 			break
 		}
 	}
@@ -283,7 +393,7 @@ func (s *MeteoraScanner) processWSLogNotification(msg map[string]interface{}) er
 func (s *MeteoraScanner) logTransactionCounter() {
 	defer s.wg.Done()
 
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(TransactionRateInterval)
 	defer ticker.Stop()
 
 	var lastTotalCounter int64
@@ -324,10 +434,11 @@ func (s *MeteoraScanner) logTransactionCounter() {
 // HealthCheck performs a health check on the scanner
 func (s *MeteoraScanner) HealthCheck() error {
 	// Check RPC connectivity
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), HealthCheckTimeout)
 	defer cancel()
 
-	_, err := s.solanaClient.GetRPCClient().GetHealth(ctx)
+	rpcClient := s.solanaClient.GetRPCClient()
+	_, err := rpcClient.GetHealth(ctx)
 	if err != nil {
 		return fmt.Errorf("RPC health check failed: %w", err)
 	}
@@ -338,8 +449,8 @@ func (s *MeteoraScanner) HealthCheck() error {
 	}
 
 	// Check recent activity
-	if time.Since(s.lastEventTime) > 2*time.Minute {
-		return fmt.Errorf("no events processed in last 2 minutes")
+	if time.Since(s.lastEventTime) > MaxInactiveTime {
+		return fmt.Errorf("no events processed in last %v", MaxInactiveTime)
 	}
 
 	return nil
