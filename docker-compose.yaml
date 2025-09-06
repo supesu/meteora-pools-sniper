@@ -9,10 +9,10 @@ services:
     env_file:
       - .env
     healthcheck:
-      test: ["CMD-SHELL", "timeout 5 bash -c '</dev/tcp/localhost/50051'"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD", "nc", "-z", "localhost", "50051"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
       start_period: 10s
     networks:
       - sniping-bot-network
@@ -26,17 +26,17 @@ services:
     env_file:
       - .env
     environment:
-      # Override gRPC connection to point to the server container
       - SNIPING_BOT_GRPC_HOST=grpc-server
       - SNIPING_BOT_GRPC_PORT=50051
     depends_on:
-      - grpc-server
+      grpc-server:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "timeout 5 bash -c '</dev/tcp/grpc-server/50051'"]
+      test: ["CMD", "nc", "-z", "grpc-server", "50051"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 30s
     networks:
       - sniping-bot-network
     restart: unless-stopped

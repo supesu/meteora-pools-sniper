@@ -63,6 +63,9 @@ func NewGRPCConnectionManager(cfg *config.Config, log logger.Logger, connConfig 
 
 // connectGRPC establishes the gRPC connection
 func (m *GRPCConnectionManager) connectGRPC(ctx context.Context) error {
+	// Create a context with timeout for connection establishment
+	connectCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 	m.connMu.Lock()
 	defer m.connMu.Unlock()
 
@@ -75,9 +78,15 @@ func (m *GRPCConnectionManager) connectGRPC(ctx context.Context) error {
 
 	m.logger.WithField("address", m.address).Info("Connecting to gRPC server...")
 
-	conn, err := grpc.NewClient(
+	// Add a small delay to ensure server is ready
+	time.Sleep(2 * time.Second)
+
+	// Create gRPC connection with proper connection parameters
+	conn, err := grpc.DialContext(
+		connectCtx,
 		m.address,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(), // Block until connection is established
 	)
 	if err != nil {
 		return fmt.Errorf("failed to establish gRPC connection: %w", err)
@@ -85,11 +94,12 @@ func (m *GRPCConnectionManager) connectGRPC(ctx context.Context) error {
 
 	m.grpcConn = conn
 
-	// Wait for connection to be ready
-	if err := m.waitForConnectionReady(ctx); err != nil {
+	// Verify connection is ready
+	state := m.grpcConn.GetState()
+	if state != connectivity.Ready {
 		conn.Close()
 		m.grpcConn = nil
-		return fmt.Errorf("gRPC connection not ready: %w", err)
+		return fmt.Errorf("gRPC connection not ready after blocking connect, state: %s", state)
 	}
 
 	m.logger.WithField("address", m.address).Info("gRPC connection established successfully")
@@ -99,27 +109,40 @@ func (m *GRPCConnectionManager) connectGRPC(ctx context.Context) error {
 // waitForConnectionReady waits for the gRPC connection to be ready
 func (m *GRPCConnectionManager) waitForConnectionReady(ctx context.Context) error {
 	state := m.grpcConn.GetState()
+	m.logger.WithField("initial_state", state).Debug("Waiting for gRPC connection to be ready")
+
 	if state == connectivity.Ready {
 		return nil
 	}
 
-	// Wait for state change with timeout
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	// Wait for state change with timeout (increased for Docker environment)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("timeout waiting for gRPC connection to be ready")
+			currentState := m.grpcConn.GetState()
+			return fmt.Errorf("timeout waiting for gRPC connection to be ready, current state: %s", currentState)
 		default:
 			if m.grpcConn.WaitForStateChange(ctx, state) {
-				state = m.grpcConn.GetState()
+				newState := m.grpcConn.GetState()
+				m.logger.WithFields(map[string]interface{}{
+					"old_state": state,
+					"new_state": newState,
+				}).Debug("gRPC connection state changed")
+
+				state = newState
 				if state == connectivity.Ready {
+					m.logger.Info("gRPC connection is now ready")
 					return nil
 				}
 				if state == connectivity.Shutdown {
 					return fmt.Errorf("gRPC connection shut down")
 				}
+			} else {
+				// Add a small delay to prevent busy waiting
+				time.Sleep(100 * time.Millisecond)
 			}
 		}
 	}
