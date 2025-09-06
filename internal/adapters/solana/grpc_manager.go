@@ -106,48 +106,6 @@ func (m *GRPCConnectionManager) connectGRPC(ctx context.Context) error {
 	return nil
 }
 
-// waitForConnectionReady waits for the gRPC connection to be ready
-func (m *GRPCConnectionManager) waitForConnectionReady(ctx context.Context) error {
-	state := m.grpcConn.GetState()
-	m.logger.WithField("initial_state", state).Debug("Waiting for gRPC connection to be ready")
-
-	if state == connectivity.Ready {
-		return nil
-	}
-
-	// Wait for state change with timeout (increased for Docker environment)
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	for {
-		select {
-		case <-ctx.Done():
-			currentState := m.grpcConn.GetState()
-			return fmt.Errorf("timeout waiting for gRPC connection to be ready, current state: %s", currentState)
-		default:
-			if m.grpcConn.WaitForStateChange(ctx, state) {
-				newState := m.grpcConn.GetState()
-				m.logger.WithFields(map[string]interface{}{
-					"old_state": state,
-					"new_state": newState,
-				}).Debug("gRPC connection state changed")
-
-				state = newState
-				if state == connectivity.Ready {
-					m.logger.Info("gRPC connection is now ready")
-					return nil
-				}
-				if state == connectivity.Shutdown {
-					return fmt.Errorf("gRPC connection shut down")
-				}
-			} else {
-				// Add a small delay to prevent busy waiting
-				time.Sleep(100 * time.Millisecond)
-			}
-		}
-	}
-}
-
 // disconnectGRPC closes the gRPC connection
 func (m *GRPCConnectionManager) disconnectGRPC() error {
 	m.connMu.Lock()
