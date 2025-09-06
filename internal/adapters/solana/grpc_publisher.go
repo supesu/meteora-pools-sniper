@@ -3,13 +3,12 @@ package solana
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/supesu/sniping-bot-v2/api/proto"
+	"github.com/supesu/sniping-bot-v2/internal/adapters"
 	"github.com/supesu/sniping-bot-v2/pkg/config"
 	"github.com/supesu/sniping-bot-v2/pkg/domain"
 	"github.com/supesu/sniping-bot-v2/pkg/logger"
@@ -17,48 +16,44 @@ import (
 
 // GRPCPublisher handles gRPC communication for publishing events
 type GRPCPublisher struct {
-	config     *config.Config
-	logger     logger.Logger
-	grpcClient pb.SnipingServiceClient
-	grpcConn   *grpc.ClientConn
+	config            *config.Config
+	logger            logger.Logger
+	grpcClient        pb.SnipingServiceClient
+	grpcConn          *grpc.ClientConn
+	connectionManager *GRPCConnectionManager
 }
 
 // NewGRPCPublisher creates a new gRPC publisher
 func NewGRPCPublisher(cfg *config.Config, log logger.Logger) *GRPCPublisher {
-	return &GRPCPublisher{
+	publisher := &GRPCPublisher{
 		config: cfg,
 		logger: log,
 	}
+
+	// Initialize gRPC connection manager with default config
+	connConfig := adapters.DefaultConnectionConfig()
+	publisher.connectionManager = NewGRPCConnectionManager(cfg, log, connConfig)
+
+	return publisher
 }
 
-// Connect establishes gRPC connection with retry logic
+// Connect establishes gRPC connection with auto-reconnection
 func (p *GRPCPublisher) Connect() error {
-	maxRetries := 30
-	retryDelay := 2 * time.Second
-
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		p.logger.WithField("attempt", attempt).Info("Attempting to connect to gRPC server...")
-
-		var err error
-		p.grpcConn, err = grpc.Dial(
-			p.config.Address(),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-		)
-		if err != nil {
-			p.logger.WithError(err).WithField("attempt", attempt).Warn("Failed to establish gRPC connection")
-			if attempt < maxRetries {
-				time.Sleep(retryDelay)
-				continue
-			}
-			return fmt.Errorf("failed to connect to gRPC server after %d attempts: %w", maxRetries, err)
-		}
-
-		p.grpcClient = pb.NewSnipingServiceClient(p.grpcConn)
-		p.logger.WithField("address", p.config.Address()).Info("gRPC connection established successfully")
-		return nil
+	if err := p.connectionManager.Connect(context.Background()); err != nil {
+		return err
 	}
 
-	return fmt.Errorf("failed to connect to gRPC server")
+	// Initialize the client with the new connection
+	conn := p.connectionManager.GetConnection()
+	if conn != nil {
+		p.grpcConn = conn
+		p.grpcClient = pb.NewSnipingServiceClient(conn)
+	}
+
+	// Start auto-reconnection
+	p.connectionManager.StartAutoReconnect(context.Background())
+
+	return nil
 }
 
 // PublishMeteoraEvent publishes a Meteora pool event to the gRPC server
@@ -99,6 +94,8 @@ func (p *GRPCPublisher) PublishMeteoraEvent(ctx context.Context, event *domain.M
 
 	resp, err := p.grpcClient.ProcessMeteoraEvent(ctx, req)
 	if err != nil {
+		// Trigger reconnection on error
+		p.connectionManager.TriggerReconnection()
 		return fmt.Errorf("failed to publish Meteora event: %w", err)
 	}
 
@@ -114,15 +111,13 @@ func (p *GRPCPublisher) PublishMeteoraEvent(ctx context.Context, event *domain.M
 	return nil
 }
 
-// Close closes the gRPC connection
+// Close closes the gRPC connection and stops auto-reconnection
 func (p *GRPCPublisher) Close() error {
-	if p.grpcConn != nil {
-		return p.grpcConn.Close()
-	}
-	return nil
+	p.connectionManager.StopAutoReconnect()
+	return p.connectionManager.Disconnect()
 }
 
 // IsConnected returns whether the gRPC client is connected
 func (p *GRPCPublisher) IsConnected() bool {
-	return p.grpcClient != nil && p.grpcConn != nil
+	return p.connectionManager.IsConnected()
 }

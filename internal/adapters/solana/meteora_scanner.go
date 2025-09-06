@@ -77,6 +77,11 @@ func (s *MeteoraScanner) Start() error {
 		return fmt.Errorf("failed to connect to gRPC server: %w", err)
 	}
 
+	// Connect to WebSocket
+	if err := s.solanaClient.ConnectWebSocket(); err != nil {
+		return fmt.Errorf("failed to connect WebSocket: %w", err)
+	}
+
 	// Start WebSocket monitoring for Meteora program
 	s.wg.Add(1)
 	go s.monitorProgramLogsWS()
@@ -125,9 +130,15 @@ func (s *MeteoraScanner) monitorProgramLogsWS() {
 			return
 		default:
 			if err := s.monitorWebSocketLogs(); err != nil {
-				s.logger.WithError(err).Error("WebSocket monitoring failed, retrying in 5 seconds...")
-				time.Sleep(5 * time.Second)
-				continue
+				s.logger.WithError(err).Error("WebSocket monitoring failed, will rely on auto-reconnection...")
+				// The connection manager will handle reconnection automatically
+				// Wait a bit before checking again
+				select {
+				case <-s.ctx.Done():
+					return
+				case <-time.After(10 * time.Second):
+					continue
+				}
 			}
 		}
 	}
@@ -135,30 +146,44 @@ func (s *MeteoraScanner) monitorProgramLogsWS() {
 
 // monitorWebSocketLogs handles the WebSocket monitoring logic
 func (s *MeteoraScanner) monitorWebSocketLogs() error {
-	// Connect to WebSocket
-	if err := s.solanaClient.ConnectWebSocket(); err != nil {
-		return fmt.Errorf("failed to connect WebSocket: %w", err)
-	}
-
-	// Subscribe to program logs
-	if err := s.solanaClient.SubscribeToProgramLogs(s.meteoraProgram); err != nil {
-		return fmt.Errorf("failed to subscribe to program logs: %w", err)
-	}
-
-	// Monitor messages
 	for {
+		// Subscribe to program logs (connection manager handles reconnection)
+		if err := s.solanaClient.SubscribeToProgramLogs(s.meteoraProgram); err != nil {
+			s.logger.WithError(err).Error("Failed to subscribe to program logs, retrying...")
+			select {
+			case <-s.ctx.Done():
+				return nil
+			case <-time.After(5 * time.Second):
+				continue
+			}
+		}
+
+		// Monitor messages
+		for {
+			select {
+			case <-s.ctx.Done():
+				return nil
+			default:
+				message, err := s.solanaClient.ReadWebSocketMessage()
+				if err != nil {
+					s.logger.WithError(err).Error("Failed to read WebSocket message, connection may have dropped")
+					// Break inner loop to retry subscription (connection manager will handle reconnection)
+					goto retrySubscription
+				}
+
+				if err := s.handleWSMessage(message); err != nil {
+					s.logger.WithError(err).Error("Failed to handle WebSocket message")
+				}
+			}
+		}
+
+	retrySubscription:
+		// Wait before retrying subscription
 		select {
 		case <-s.ctx.Done():
 			return nil
-		default:
-			message, err := s.solanaClient.ReadWebSocketMessage()
-			if err != nil {
-				return fmt.Errorf("failed to read WebSocket message: %w", err)
-			}
-
-			if err := s.handleWSMessage(message); err != nil {
-				s.logger.WithError(err).Error("Failed to handle WebSocket message")
-			}
+		case <-time.After(2 * time.Second):
+			continue
 		}
 	}
 }
