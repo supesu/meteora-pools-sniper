@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -29,31 +30,20 @@ func NewProcessTransactionUseCase(
 	}
 }
 
-// ProcessTransactionCommand represents the command to process a transaction
-type ProcessTransactionCommand struct {
-	Signature string
-	ProgramID string
-	Accounts  []string
-	Data      []byte
-	Timestamp time.Time
-	Slot      uint64
-	Status    domain.TransactionStatus
-	Metadata  map[string]string
-	ScannerID string
-}
-
-// ProcessTransactionResult represents the result of processing a transaction
-type ProcessTransactionResult struct {
-	TransactionID string
-	IsNew         bool
-	Message       string
-}
+// Custom error types for better error handling
+var (
+	ErrInvalidCommand       = errors.New("invalid command")
+	ErrTransactionInvalid   = errors.New("transaction validation failed")
+	ErrDuplicateTransaction = errors.New("duplicate transaction")
+	ErrStorageFailure       = errors.New("storage operation failed")
+)
 
 // Execute processes a transaction according to business rules
-func (uc *ProcessTransactionUseCase) Execute(ctx context.Context, cmd interface{}) (interface{}, error) {
-	command, ok := cmd.(*ProcessTransactionCommand)
-	if !ok {
-		return nil, fmt.Errorf("invalid command type")
+func (uc *ProcessTransactionUseCase) Execute(ctx context.Context, command *domain.ProcessTransactionCommand) (*domain.ProcessTransactionResult, error) {
+
+	// Validate command input
+	if err := uc.validateCommand(command); err != nil {
+		return nil, fmt.Errorf("command validation failed: %w", err)
 	}
 	// Log the start of transaction processing
 	uc.logger.WithFields(map[string]interface{}{
@@ -85,7 +75,7 @@ func (uc *ProcessTransactionUseCase) Execute(ctx context.Context, cmd interface{
 			_ = uc.eventPublisher.PublishTransactionFailed(ctx, command.Signature, "validation failed")
 		}
 
-		return nil, fmt.Errorf("transaction validation failed: signature=%s", command.Signature)
+		return nil, fmt.Errorf("%w: signature=%s", ErrTransactionInvalid, command.Signature)
 	}
 
 	// Business Rule 3: Check for duplicate transactions
@@ -109,7 +99,7 @@ func (uc *ProcessTransactionUseCase) Execute(ctx context.Context, cmd interface{
 			uc.logger.WithField("signature", command.Signature).Info("Updated existing transaction status")
 		}
 
-		return &ProcessTransactionResult{
+		return &domain.ProcessTransactionResult{
 			TransactionID: existing.Signature,
 			IsNew:         false,
 			Message:       "Transaction already exists (updated if needed)",
@@ -125,7 +115,7 @@ func (uc *ProcessTransactionUseCase) Execute(ctx context.Context, cmd interface{
 			_ = uc.eventPublisher.PublishTransactionFailed(ctx, command.Signature, "storage failed")
 		}
 
-		return nil, fmt.Errorf("failed to store transaction: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrStorageFailure, err)
 	}
 
 	// Business Rule 5: Publish success event for downstream processing
@@ -143,9 +133,32 @@ func (uc *ProcessTransactionUseCase) Execute(ctx context.Context, cmd interface{
 		"processing_time": time.Since(command.Timestamp).String(),
 	}).Info("Transaction processed successfully")
 
-	return &ProcessTransactionResult{
+	return &domain.ProcessTransactionResult{
 		TransactionID: tx.Signature,
 		IsNew:         true,
 		Message:       "Transaction processed successfully",
 	}, nil
+}
+
+// validateCommand validates the input command parameters
+func (uc *ProcessTransactionUseCase) validateCommand(cmd *domain.ProcessTransactionCommand) error {
+	if cmd == nil {
+		return fmt.Errorf("command cannot be nil")
+	}
+	if cmd.Signature == "" {
+		return fmt.Errorf("signature cannot be empty")
+	}
+	if cmd.ProgramID == "" {
+		return fmt.Errorf("program ID cannot be empty")
+	}
+	if len(cmd.Accounts) == 0 {
+		return fmt.Errorf("accounts cannot be empty")
+	}
+	if cmd.ScannerID == "" {
+		return fmt.Errorf("scanner ID cannot be empty")
+	}
+	if cmd.Timestamp.IsZero() {
+		return fmt.Errorf("timestamp cannot be zero")
+	}
+	return nil
 }

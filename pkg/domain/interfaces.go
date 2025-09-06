@@ -2,11 +2,32 @@ package domain
 
 import (
 	"context"
+	"time"
 )
+
+// ProcessTransactionCommand represents the command to process a transaction
+type ProcessTransactionCommand struct {
+	Signature string
+	ProgramID string
+	Accounts  []string
+	Data      []byte
+	Timestamp time.Time
+	Slot      uint64
+	Status    TransactionStatus
+	Metadata  map[string]string
+	ScannerID string
+}
+
+// ProcessTransactionResult represents the result of processing a transaction
+type ProcessTransactionResult struct {
+	TransactionID string
+	IsNew         bool
+	Message       string
+}
 
 // ProcessTransactionUseCaseInterface defines the interface for processing transactions
 type ProcessTransactionUseCaseInterface interface {
-	Execute(ctx context.Context, command interface{}) (interface{}, error)
+	Execute(ctx context.Context, command *ProcessTransactionCommand) (*ProcessTransactionResult, error)
 }
 
 // GetTransactionHistoryUseCaseInterface defines the interface for getting transaction history

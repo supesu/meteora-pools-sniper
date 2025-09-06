@@ -13,6 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
+	domain "github.com/supesu/sniping-bot-v2/pkg/domain"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -41,10 +42,10 @@ func (m *MockProcessTransactionUseCaseInterface) EXPECT() *MockProcessTransactio
 }
 
 // Execute mocks base method.
-func (m *MockProcessTransactionUseCaseInterface) Execute(ctx context.Context, command any) (any, error) {
+func (m *MockProcessTransactionUseCaseInterface) Execute(ctx context.Context, command *domain.ProcessTransactionCommand) (*domain.ProcessTransactionResult, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Execute", ctx, command)
-	ret0, _ := ret[0].(any)
+	ret0, _ := ret[0].(*domain.ProcessTransactionResult)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

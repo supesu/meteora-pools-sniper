@@ -93,6 +93,7 @@ func TestNotifyTokenCreationUseCase_Execute_InvalidEvent(t *testing.T) {
 		TokenSymbol:     "TEST",
 		CreatorAddress:  "creator-123",
 		TransactionHash: "tx-123",
+		Timestamp:       time.Now(),
 	}
 
 	result, err := useCase.Execute(context.Background(), &cmd)
@@ -117,6 +118,7 @@ func TestNotifyTokenCreationUseCase_Execute_DiscordServiceUnhealthy(t *testing.T
 		TokenSymbol:     "TEST",
 		CreatorAddress:  "creator-123",
 		TransactionHash: "tx-123",
+		Timestamp:       time.Now(),
 	}
 
 	// Mock unhealthy service
@@ -153,6 +155,7 @@ func TestNotifyTokenCreationUseCase_Execute_SendNotificationFailure(t *testing.T
 		TokenSymbol:     "TEST",
 		CreatorAddress:  "creator-123",
 		TransactionHash: "tx-123",
+		Timestamp:       time.Now(),
 	}
 
 	// Mock expectations
@@ -199,6 +202,7 @@ func TestNotifyTokenCreationUseCase_Execute_WithMetadata(t *testing.T) {
 		TokenSymbol:     "TEST",
 		CreatorAddress:  "creator-123",
 		TransactionHash: "tx-123",
+		Timestamp:       time.Now(),
 		Metadata:        metadata,
 	}
 
@@ -280,6 +284,7 @@ func TestNotifyTokenCreationUseCase_Execute_WithEmptyMetadata(t *testing.T) {
 		TokenSymbol:     "TEST",
 		CreatorAddress:  "creator-123",
 		TransactionHash: "tx-123",
+		Timestamp:       time.Now(),
 		Metadata:        map[string]string{}, // Empty metadata
 	}
 
@@ -322,6 +327,7 @@ func TestNotifyTokenCreationUseCase_Execute_NilMetadata(t *testing.T) {
 		TokenSymbol:     "TEST",
 		CreatorAddress:  "creator-123",
 		TransactionHash: "tx-123",
+		Timestamp:       time.Now(),
 		Metadata:        nil, // Nil metadata
 	}
 

@@ -2,7 +2,9 @@ package grpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -55,20 +57,12 @@ func NewHandler(
 
 // ProcessTransaction handles incoming transaction data
 func (h *Handler) ProcessTransaction(ctx context.Context, req *pb.ProcessTransactionRequest) (*pb.ProcessTransactionResponse, error) {
-	if req == nil {
-		h.logger.Error("Process transaction request is nil")
+	// Validate input request
+	if err := h.validateProcessTransactionRequest(req); err != nil {
+		h.logger.WithError(err).Error("Invalid process transaction request")
 		return &pb.ProcessTransactionResponse{
 			Success: false,
-			Message: "Request cannot be nil",
-		}, nil
-	}
-
-	// Convert protobuf to domain
-	if req.Transaction == nil {
-		h.logger.Error("Transaction in request is nil")
-		return &pb.ProcessTransactionResponse{
-			Success: false,
-			Message: "Transaction cannot be nil",
+			Message: err.Error(),
 		}, nil
 	}
 
@@ -80,7 +74,7 @@ func (h *Handler) ProcessTransaction(ctx context.Context, req *pb.ProcessTransac
 	tx := h.converter.convertProtobufToDomain(req.Transaction)
 
 	// Create command and execute use case
-	cmd := usecase.ProcessTransactionCommand{
+	cmd := &domain.ProcessTransactionCommand{
 		Signature: tx.Signature,
 		ProgramID: tx.ProgramID,
 		Accounts:  tx.Accounts,
@@ -100,21 +94,12 @@ func (h *Handler) ProcessTransaction(ctx context.Context, req *pb.ProcessTransac
 		}, nil
 	}
 
-	result, err := h.processTransactionUC.Execute(ctx, cmd)
+	processResult, err := h.processTransactionUC.Execute(ctx, cmd)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to process transaction")
 		return &pb.ProcessTransactionResponse{
 			Success: false,
 			Message: fmt.Sprintf("Failed to process transaction: %v", err),
-		}, nil
-	}
-
-	processResult, ok := result.(*usecase.ProcessTransactionResult)
-	if !ok {
-		h.logger.Error("Invalid result type from process transaction use case")
-		return &pb.ProcessTransactionResponse{
-			Success: false,
-			Message: "Invalid result type from process transaction use case",
 		}, nil
 	}
 
@@ -361,4 +346,42 @@ func (h *Handler) notifyMeteoraPoolCreation(ctx context.Context, event *pb.Meteo
 	}
 
 	h.notifyMeteoraPoolCreationUC.Execute(ctx, cmd)
+}
+
+// validateProcessTransactionRequest validates the input request for ProcessTransaction
+func (h *Handler) validateProcessTransactionRequest(req *pb.ProcessTransactionRequest) error {
+	if req == nil {
+		return errors.New("request cannot be nil")
+	}
+
+	if req.Transaction == nil {
+		return errors.New("transaction cannot be nil")
+	}
+
+	if strings.TrimSpace(req.Transaction.Signature) == "" {
+		return errors.New("transaction signature cannot be empty")
+	}
+
+	if strings.TrimSpace(req.Transaction.ProgramId) == "" {
+		return errors.New("transaction program ID cannot be empty")
+	}
+
+	if len(req.Transaction.Accounts) == 0 {
+		return errors.New("transaction accounts cannot be empty")
+	}
+
+	if strings.TrimSpace(req.ScannerId) == "" {
+		return errors.New("scanner ID cannot be empty")
+	}
+
+	if req.Transaction.Timestamp == nil {
+		return errors.New("transaction timestamp cannot be nil")
+	}
+
+	// Validate timestamp is not zero
+	if req.Transaction.Timestamp.AsTime().IsZero() {
+		return errors.New("transaction timestamp cannot be zero")
+	}
+
+	return nil
 }

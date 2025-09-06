@@ -10,6 +10,7 @@ import (
 	pb "github.com/supesu/sniping-bot-v2/api/proto"
 	"github.com/supesu/sniping-bot-v2/internal/mocks"
 	"github.com/supesu/sniping-bot-v2/internal/usecase"
+	"github.com/supesu/sniping-bot-v2/pkg/domain"
 	"github.com/supesu/sniping-bot-v2/pkg/logger"
 
 	"github.com/stretchr/testify/assert"
@@ -81,7 +82,7 @@ func TestHandler_ProcessTransaction(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 		assert.False(t, resp.Success)
-		assert.Contains(t, resp.Message, "Request cannot be nil")
+		assert.Contains(t, resp.Message, "request cannot be nil")
 	})
 
 	t.Run("input validation - nil transaction", func(t *testing.T) {
@@ -353,7 +354,7 @@ func TestHandler_InputValidation(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 		assert.False(t, resp.Success)
-		assert.Contains(t, resp.Message, "Request cannot be nil")
+		assert.Contains(t, resp.Message, "request cannot be nil")
 	})
 
 	t.Run("process transaction with nil transaction", func(t *testing.T) {
@@ -366,7 +367,7 @@ func TestHandler_InputValidation(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 		assert.False(t, resp.Success)
-		assert.Contains(t, resp.Message, "Transaction cannot be nil")
+		assert.Contains(t, resp.Message, "transaction cannot be nil")
 	})
 
 	t.Run("process meteora event with nil event", func(t *testing.T) {
@@ -419,6 +420,7 @@ func TestHandler_ErrorResponseFormatting(t *testing.T) {
 				Accounts:  []string{"acc1"},
 				Slot:      12345,
 				Status:    pb.TransactionStatus_TRANSACTION_STATUS_CONFIRMED,
+				Timestamp: timestamppb.New(time.Now()),
 			},
 			ScannerId: "scanner-1",
 		}
@@ -499,7 +501,7 @@ func TestHandler_ConcurrentRequests(t *testing.T) {
 		// Set up expectations for concurrent calls
 		mockProcessTxUC.EXPECT().
 			Execute(ctx, gomock.Any()).
-			Return(&usecase.ProcessTransactionResult{
+			Return(&domain.ProcessTransactionResult{
 				TransactionID: "test-sig",
 				IsNew:         true,
 				Message:       "Processed",
@@ -515,6 +517,7 @@ func TestHandler_ConcurrentRequests(t *testing.T) {
 						Accounts:  []string{"acc1"},
 						Slot:      12345,
 						Status:    pb.TransactionStatus_TRANSACTION_STATUS_CONFIRMED,
+						Timestamp: timestamppb.New(time.Now()),
 					},
 					ScannerId: "scanner-1",
 				}

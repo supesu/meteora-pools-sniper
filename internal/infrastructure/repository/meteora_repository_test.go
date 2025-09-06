@@ -13,124 +13,8 @@ import (
 	"github.com/supesu/sniping-bot-v2/pkg/logger"
 )
 
-// MockLogger implements the Logger interface for testing
-type MockLogger struct {
-	mu     sync.Mutex
-	logs   []string
-	fields map[string]interface{}
-}
-
-func NewMockLogger() *MockLogger {
-	return &MockLogger{
-		logs:   make([]string, 0),
-		fields: make(map[string]interface{}),
-	}
-}
-
-func (m *MockLogger) Debug(args ...interface{}) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.logs = append(m.logs, fmt.Sprintf("DEBUG: %v", args))
-}
-
-func (m *MockLogger) Info(args ...interface{}) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.logs = append(m.logs, fmt.Sprintf("INFO: %v", args))
-}
-
-func (m *MockLogger) Warn(args ...interface{}) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.logs = append(m.logs, fmt.Sprintf("WARN: %v", args))
-}
-
-func (m *MockLogger) Error(args ...interface{}) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.logs = append(m.logs, fmt.Sprintf("ERROR: %v", args))
-}
-
-func (m *MockLogger) Fatal(args ...interface{}) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.logs = append(m.logs, fmt.Sprintf("FATAL: %v", args))
-}
-
-func (m *MockLogger) Debugf(format string, args ...interface{}) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.logs = append(m.logs, fmt.Sprintf("DEBUG: "+format, args...))
-}
-
-func (m *MockLogger) Infof(format string, args ...interface{}) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.logs = append(m.logs, fmt.Sprintf("INFO: "+format, args...))
-}
-
-func (m *MockLogger) Warnf(format string, args ...interface{}) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.logs = append(m.logs, fmt.Sprintf("WARN: "+format, args...))
-}
-
-func (m *MockLogger) Errorf(format string, args ...interface{}) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.logs = append(m.logs, fmt.Sprintf("ERROR: "+format, args...))
-}
-
-func (m *MockLogger) Fatalf(format string, args ...interface{}) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.logs = append(m.logs, fmt.Sprintf("FATAL: "+format, args...))
-}
-
-func (m *MockLogger) WithField(key string, value interface{}) logger.Logger {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	newFields := make(map[string]interface{})
-	for k, v := range m.fields {
-		newFields[k] = v
-	}
-	newFields[key] = value
-	return &MockLogger{
-		logs:   m.logs,
-		fields: newFields,
-	}
-}
-
-func (m *MockLogger) WithFields(fields map[string]interface{}) logger.Logger {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	newFields := make(map[string]interface{})
-	for k, v := range m.fields {
-		newFields[k] = v
-	}
-	for k, v := range fields {
-		newFields[k] = v
-	}
-	return &MockLogger{
-		logs:   m.logs,
-		fields: newFields,
-	}
-}
-
-func (m *MockLogger) WithError(err error) logger.Logger {
-	return m.WithField("error", err.Error())
-}
-
-func (m *MockLogger) GetLogs() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	logs := make([]string, len(m.logs))
-	copy(logs, m.logs)
-	return logs
-}
-
 func TestNewMeteoraRepository(t *testing.T) {
-	logger := NewMockLogger()
+	logger := logger.New("info", "test")
 	repo := NewMeteoraRepository(logger)
 
 	assert.NotNil(t, repo)
@@ -141,7 +25,7 @@ func TestNewMeteoraRepository(t *testing.T) {
 
 func TestMeteoraRepository_StorePool(t *testing.T) {
 	ctx := context.Background()
-	logger := NewMockLogger()
+	logger := logger.New("info", "test")
 	repo := NewMeteoraRepository(logger)
 
 	validPool := &domain.MeteoraPoolInfo{
@@ -212,7 +96,7 @@ func TestMeteoraRepository_StorePool(t *testing.T) {
 
 func TestMeteoraRepository_FindPoolByAddress(t *testing.T) {
 	ctx := context.Background()
-	logger := NewMockLogger()
+	logger := logger.New("info", "test")
 	repo := NewMeteoraRepository(logger)
 
 	// Store a pool
@@ -263,7 +147,7 @@ func TestMeteoraRepository_FindPoolByAddress(t *testing.T) {
 
 func TestMeteoraRepository_FindPoolsByTokenPair(t *testing.T) {
 	ctx := context.Background()
-	logger := NewMockLogger()
+	logger := logger.New("info", "test")
 	repo := NewMeteoraRepository(logger)
 
 	// Create test pools
@@ -331,7 +215,7 @@ func TestMeteoraRepository_FindPoolsByTokenPair(t *testing.T) {
 
 func TestMeteoraRepository_FindPoolsByCreator(t *testing.T) {
 	ctx := context.Background()
-	logger := NewMockLogger()
+	logger := logger.New("info", "test")
 	repo := NewMeteoraRepository(logger)
 
 	// Create test pools
@@ -393,7 +277,7 @@ func TestMeteoraRepository_FindPoolsByCreator(t *testing.T) {
 
 func TestMeteoraRepository_GetRecentPools(t *testing.T) {
 	ctx := context.Background()
-	logger := NewMockLogger()
+	logger := logger.New("info", "test")
 	repo := NewMeteoraRepository(logger)
 
 	baseTime := time.Now()
@@ -473,7 +357,7 @@ func TestMeteoraRepository_GetRecentPools(t *testing.T) {
 
 func TestMeteoraRepository_UpdatePool(t *testing.T) {
 	ctx := context.Background()
-	logger := NewMockLogger()
+	logger := logger.New("info", "test")
 	repo := NewMeteoraRepository(logger)
 
 	// Store initial pool
@@ -542,7 +426,7 @@ func TestMeteoraRepository_UpdatePool(t *testing.T) {
 
 func TestMeteoraRepository_Count(t *testing.T) {
 	ctx := context.Background()
-	logger := NewMockLogger()
+	logger := logger.New("info", "test")
 	repo := NewMeteoraRepository(logger)
 
 	// Initially empty
@@ -569,7 +453,7 @@ func TestMeteoraRepository_Count(t *testing.T) {
 
 func TestMeteoraRepository_Delete(t *testing.T) {
 	ctx := context.Background()
-	logger := NewMockLogger()
+	logger := logger.New("info", "test")
 	repo := NewMeteoraRepository(logger)
 
 	// Store a pool
@@ -609,7 +493,7 @@ func TestMeteoraRepository_Delete(t *testing.T) {
 
 func TestMeteoraRepository_GetPoolsByTimeRange(t *testing.T) {
 	ctx := context.Background()
-	logger := NewMockLogger()
+	logger := logger.New("info", "test")
 	repo := NewMeteoraRepository(logger)
 
 	baseTime := time.Now()
@@ -674,7 +558,7 @@ func TestMeteoraRepository_GetPoolsByTimeRange(t *testing.T) {
 
 func TestMeteoraRepository_GetPoolStats(t *testing.T) {
 	ctx := context.Background()
-	logger := NewMockLogger()
+	logger := logger.New("info", "test")
 	repo := NewMeteoraRepository(logger)
 
 	// Create test pools
@@ -725,7 +609,7 @@ func TestMeteoraRepository_GetPoolStats(t *testing.T) {
 
 func TestMeteoraRepository_Concurrency(t *testing.T) {
 	ctx := context.Background()
-	logger := NewMockLogger()
+	logger := logger.New("info", "test")
 	repo := NewMeteoraRepository(logger)
 
 	t.Run("concurrent read and write operations", func(t *testing.T) {

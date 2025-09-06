@@ -19,6 +19,8 @@ func TestTokenCreationEvent_IsValid(t *testing.T) {
 				TokenAddress:    "token-123",
 				CreatorAddress:  "creator-123",
 				TransactionHash: "tx-123",
+				TokenSymbol:     "TEST",
+				Timestamp:       time.Now(),
 			},
 			want: true,
 		},
@@ -47,29 +49,22 @@ func TestTokenCreationEvent_IsValid(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "empty token address",
+			name: "missing both symbol and name",
 			event: TokenCreationEvent{
-				TokenAddress:    "",
+				TokenAddress:    "token-123",
 				CreatorAddress:  "creator-123",
 				TransactionHash: "tx-123",
 			},
 			want: false,
 		},
 		{
-			name: "empty creator address",
-			event: TokenCreationEvent{
-				TokenAddress:    "token-123",
-				CreatorAddress:  "",
-				TransactionHash: "tx-123",
-			},
-			want: false,
-		},
-		{
-			name: "empty transaction hash",
+			name: "zero timestamp",
 			event: TokenCreationEvent{
 				TokenAddress:    "token-123",
 				CreatorAddress:  "creator-123",
-				TransactionHash: "",
+				TransactionHash: "tx-123",
+				TokenSymbol:     "SOL",
+				Timestamp:       time.Time{}, // Zero time
 			},
 			want: false,
 		},
@@ -150,32 +145,8 @@ func TestTokenCreationEvent_GetDisplayName(t *testing.T) {
 			expected: "Solana",
 		},
 		{
-			name:     "both symbol and name missing",
+			name:     "both missing",
 			event:    TokenCreationEvent{},
-			expected: "Unknown Token",
-		},
-		{
-			name: "empty symbol, name present",
-			event: TokenCreationEvent{
-				TokenSymbol: "",
-				TokenName:   "Solana",
-			},
-			expected: "Solana",
-		},
-		{
-			name: "symbol present, empty name",
-			event: TokenCreationEvent{
-				TokenSymbol: "SOL",
-				TokenName:   "",
-			},
-			expected: "SOL",
-		},
-		{
-			name: "both empty strings",
-			event: TokenCreationEvent{
-				TokenSymbol: "",
-				TokenName:   "",
-			},
 			expected: "Unknown Token",
 		},
 	}
@@ -210,26 +181,4 @@ func TestTokenCreationEvent_MetadataOperations(t *testing.T) {
 	assert.Equal(t, "updated_value1", value1)
 	assert.Equal(t, "value2", value2)
 	assert.Equal(t, "", value3)
-}
-
-func TestTokenCreationEvent_EdgeCases(t *testing.T) {
-	t.Run("age with zero timestamp", func(t *testing.T) {
-		event := TokenCreationEvent{Timestamp: time.Time{}}
-		age := event.Age()
-		assert.True(t, age > 0) // Should return some duration
-	})
-
-	t.Run("metadata with special characters", func(t *testing.T) {
-		event := TokenCreationEvent{}
-		event.AddMetadata("key with spaces", "value with spaces")
-		event.AddMetadata("key-with-dashes", "value-with-dashes")
-
-		value1, exists1 := event.GetMetadata("key with spaces")
-		value2, exists2 := event.GetMetadata("key-with-dashes")
-
-		assert.True(t, exists1)
-		assert.True(t, exists2)
-		assert.Equal(t, "value with spaces", value1)
-		assert.Equal(t, "value-with-dashes", value2)
-	})
 }

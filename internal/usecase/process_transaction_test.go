@@ -39,7 +39,7 @@ func TestProcessTransactionUseCase_Execute_NewTransaction_Success(t *testing.T) 
 
 	useCase := NewProcessTransactionUseCase(mockRepo, mockPublisher, log)
 
-	cmd := ProcessTransactionCommand{
+	cmd := domain.ProcessTransactionCommand{
 		Signature: "test-signature",
 		ProgramID: "test-program",
 		Accounts:  []string{"acc1", "acc2"},
@@ -79,9 +79,8 @@ func TestProcessTransactionUseCase_Execute_NewTransaction_Success(t *testing.T) 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 
-	// Type assert the result
-	processResult, ok := result.(*ProcessTransactionResult)
-	assert.True(t, ok)
+	// The result is already the correct type
+	processResult := result
 
 	assert.Equal(t, cmd.Signature, processResult.TransactionID)
 	assert.True(t, processResult.IsNew)
@@ -98,7 +97,7 @@ func TestProcessTransactionUseCase_Execute_DuplicateTransaction_Update(t *testin
 
 	useCase := NewProcessTransactionUseCase(mockRepo, mockPublisher, log)
 
-	cmd := ProcessTransactionCommand{
+	cmd := domain.ProcessTransactionCommand{
 		Signature: "test-signature",
 		ProgramID: "MeteoraProgram11111111111111111111111111111112",
 		Accounts:  []string{"acc1", "acc2"},
@@ -130,9 +129,8 @@ func TestProcessTransactionUseCase_Execute_DuplicateTransaction_Update(t *testin
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 
-	// Type assert the result
-	processResult, ok := result.(*ProcessTransactionResult)
-	assert.True(t, ok)
+	// The result is already the correct type
+	processResult := result
 
 	assert.Equal(t, cmd.Signature, processResult.TransactionID)
 	assert.False(t, processResult.IsNew)
@@ -150,16 +148,14 @@ func TestProcessTransactionUseCase_Execute_InvalidTransaction(t *testing.T) {
 	useCase := NewProcessTransactionUseCase(mockRepo, mockPublisher, log)
 
 	// Create an invalid transaction (empty signature)
-	cmd := ProcessTransactionCommand{
+	cmd := domain.ProcessTransactionCommand{
 		Signature: "", // Invalid: empty signature
 		ProgramID: "test-program",
 		Status:    domain.TransactionStatusConfirmed,
 	}
 
-	// Setup expectations - should publish failure event
-	mockPublisher.EXPECT().
-		PublishTransactionFailed(gomock.Any(), cmd.Signature, "validation failed").
-		Return(nil)
+	// Note: Command validation happens before domain transaction creation
+	// so no failure event is published for invalid commands
 
 	result, err := useCase.Execute(context.Background(), &cmd)
 
@@ -178,7 +174,7 @@ func TestProcessTransactionUseCase_Execute_StoreError(t *testing.T) {
 
 	useCase := NewProcessTransactionUseCase(mockRepo, mockPublisher, log)
 
-	cmd := ProcessTransactionCommand{
+	cmd := domain.ProcessTransactionCommand{
 		Signature: "test-signature",
 		ProgramID: "MeteoraProgram11111111111111111111111111111112",
 		Accounts:  []string{"acc1", "acc2"},
@@ -204,7 +200,7 @@ func TestProcessTransactionUseCase_Execute_StoreError(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "failed to store transaction")
+	assert.Contains(t, err.Error(), "storage operation failed")
 }
 
 func TestProcessTransactionUseCase_Execute_EventPublishError(t *testing.T) {
@@ -217,7 +213,7 @@ func TestProcessTransactionUseCase_Execute_EventPublishError(t *testing.T) {
 
 	useCase := NewProcessTransactionUseCase(mockRepo, mockPublisher, log)
 
-	cmd := ProcessTransactionCommand{
+	cmd := domain.ProcessTransactionCommand{
 		Signature: "test-signature",
 		ProgramID: "MeteoraProgram11111111111111111111111111111112",
 		Accounts:  []string{"acc1", "acc2"},
@@ -245,9 +241,8 @@ func TestProcessTransactionUseCase_Execute_EventPublishError(t *testing.T) {
 	assert.NoError(t, err) // Operation should succeed despite publish error
 	assert.NotNil(t, result)
 
-	// Type assert the result
-	processResult, ok := result.(*ProcessTransactionResult)
-	assert.True(t, ok)
+	// The result is already the correct type
+	processResult := result
 
 	assert.True(t, processResult.IsNew)
 }
@@ -262,7 +257,7 @@ func TestProcessTransactionUseCase_Execute_FindBySignatureError(t *testing.T) {
 
 	useCase := NewProcessTransactionUseCase(mockRepo, mockPublisher, log)
 
-	cmd := ProcessTransactionCommand{
+	cmd := domain.ProcessTransactionCommand{
 		Signature: "test-signature",
 		ProgramID: "MeteoraProgram11111111111111111111111111111112",
 		Accounts:  []string{"acc1", "acc2"},
@@ -289,9 +284,8 @@ func TestProcessTransactionUseCase_Execute_FindBySignatureError(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 
-	// Type assert the result
-	processResult, ok := result.(*ProcessTransactionResult)
-	assert.True(t, ok)
+	// The result is already the correct type
+	processResult := result
 
 	assert.True(t, processResult.IsNew)
 }

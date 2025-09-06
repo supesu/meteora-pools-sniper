@@ -20,6 +20,9 @@ type TokenCreationEvent struct {
 
 // IsValid validates the token creation event according to business rules
 func (t *TokenCreationEvent) IsValid() bool {
+	if t == nil {
+		return false
+	}
 	if t.TokenAddress == "" {
 		return false
 	}
@@ -27,6 +30,14 @@ func (t *TokenCreationEvent) IsValid() bool {
 		return false
 	}
 	if t.TransactionHash == "" {
+		return false
+	}
+	// Validate token symbol/name combination
+	if t.TokenSymbol == "" && t.TokenName == "" {
+		return false
+	}
+	// Validate timestamp is not zero
+	if t.Timestamp.IsZero() {
 		return false
 	}
 	return true
