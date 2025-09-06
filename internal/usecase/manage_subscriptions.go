@@ -44,14 +44,18 @@ type SubscribeResult struct {
 }
 
 // Subscribe subscribes a client to transaction events for specific programs
-func (uc *ManageSubscriptionsUseCase) Subscribe(ctx context.Context, cmd SubscribeCommand) (*SubscribeResult, error) {
+func (uc *ManageSubscriptionsUseCase) Subscribe(ctx context.Context, cmd interface{}) (interface{}, error) {
+	subscribeCmd, ok := cmd.(*SubscribeCommand)
+	if !ok {
+		return nil, fmt.Errorf("invalid command type")
+	}
 	uc.logger.WithFields(map[string]interface{}{
-		"client_id":   cmd.ClientID,
-		"program_ids": cmd.ProgramIDs,
+		"client_id":   subscribeCmd.ClientID,
+		"program_ids": subscribeCmd.ProgramIDs,
 	}).Info("Processing subscription request")
 
 	// Business Rule 1: Validate subscription request
-	if err := uc.validateSubscriptionRequest(cmd); err != nil {
+	if err := uc.validateSubscriptionRequest(*subscribeCmd); err != nil {
 		return nil, fmt.Errorf("subscription validation failed: %w", err)
 	}
 
@@ -63,16 +67,16 @@ func (uc *ManageSubscriptionsUseCase) Subscribe(ctx context.Context, cmd Subscri
 	}
 
 	isUpdate := false
-	if _, exists := existingSubscriptions[cmd.ClientID]; exists {
+	if _, exists := existingSubscriptions[subscribeCmd.ClientID]; exists {
 		isUpdate = true
-		uc.logger.WithField("client_id", cmd.ClientID).Info("Updating existing subscription")
+		uc.logger.WithField("client_id", subscribeCmd.ClientID).Info("Updating existing subscription")
 	}
 
 	// Business Rule 3: Apply business constraints to program IDs
-	programIDs := uc.applyProgramIDConstraints(cmd.ProgramIDs)
+	programIDs := uc.applyProgramIDConstraints(subscribeCmd.ProgramIDs)
 
 	// Business Rule 4: Store the subscription
-	if err := uc.subscriptionRepo.Subscribe(ctx, cmd.ClientID, programIDs); err != nil {
+	if err := uc.subscriptionRepo.Subscribe(ctx, subscribeCmd.ClientID, programIDs); err != nil {
 		uc.logger.WithError(err).Error("Failed to store subscription")
 		return nil, fmt.Errorf("failed to store subscription: %w", err)
 	}
@@ -80,13 +84,13 @@ func (uc *ManageSubscriptionsUseCase) Subscribe(ctx context.Context, cmd Subscri
 	subscribedAt := time.Now()
 
 	uc.logger.WithFields(map[string]interface{}{
-		"client_id":     cmd.ClientID,
+		"client_id":     subscribeCmd.ClientID,
 		"program_count": len(programIDs),
 		"is_update":     isUpdate,
 	}).Info("Subscription processed successfully")
 
 	return &SubscribeResult{
-		ClientID:     cmd.ClientID,
+		ClientID:     subscribeCmd.ClientID,
 		ProgramIDs:   programIDs,
 		SubscribedAt: subscribedAt,
 		IsUpdate:     isUpdate,
@@ -106,11 +110,15 @@ type UnsubscribeResult struct {
 }
 
 // Unsubscribe removes a client's subscription
-func (uc *ManageSubscriptionsUseCase) Unsubscribe(ctx context.Context, cmd UnsubscribeCommand) (*UnsubscribeResult, error) {
-	uc.logger.WithField("client_id", cmd.ClientID).Info("Processing unsubscribe request")
+func (uc *ManageSubscriptionsUseCase) Unsubscribe(ctx context.Context, cmd interface{}) (interface{}, error) {
+	unsubscribeCmd, ok := cmd.(*UnsubscribeCommand)
+	if !ok {
+		return nil, fmt.Errorf("invalid command type")
+	}
+	uc.logger.WithField("client_id", unsubscribeCmd.ClientID).Info("Processing unsubscribe request")
 
 	// Business Rule 1: Validate unsubscribe request
-	if cmd.ClientID == "" {
+	if unsubscribeCmd.ClientID == "" {
 		return nil, fmt.Errorf("client ID is required")
 	}
 
@@ -121,14 +129,14 @@ func (uc *ManageSubscriptionsUseCase) Unsubscribe(ctx context.Context, cmd Unsub
 		return nil, fmt.Errorf("failed to check existing subscriptions: %w", err)
 	}
 
-	programIDs, exists := existingSubscriptions[cmd.ClientID]
+	programIDs, exists := existingSubscriptions[unsubscribeCmd.ClientID]
 	if !exists {
-		uc.logger.WithField("client_id", cmd.ClientID).Warn("Attempted to unsubscribe non-existent subscription")
-		return nil, fmt.Errorf("subscription not found for client: %s", cmd.ClientID)
+		uc.logger.WithField("client_id", unsubscribeCmd.ClientID).Warn("Attempted to unsubscribe non-existent subscription")
+		return nil, fmt.Errorf("subscription not found for client: %s", unsubscribeCmd.ClientID)
 	}
 
 	// Business Rule 3: Remove the subscription
-	if err := uc.subscriptionRepo.Unsubscribe(ctx, cmd.ClientID); err != nil {
+	if err := uc.subscriptionRepo.Unsubscribe(ctx, unsubscribeCmd.ClientID); err != nil {
 		uc.logger.WithError(err).Error("Failed to remove subscription")
 		return nil, fmt.Errorf("failed to remove subscription: %w", err)
 	}
@@ -136,12 +144,12 @@ func (uc *ManageSubscriptionsUseCase) Unsubscribe(ctx context.Context, cmd Unsub
 	unsubscribedAt := time.Now()
 
 	uc.logger.WithFields(map[string]interface{}{
-		"client_id":     cmd.ClientID,
+		"client_id":     unsubscribeCmd.ClientID,
 		"program_count": len(programIDs),
 	}).Info("Unsubscription processed successfully")
 
 	return &UnsubscribeResult{
-		ClientID:       cmd.ClientID,
+		ClientID:       unsubscribeCmd.ClientID,
 		UnsubscribedAt: unsubscribedAt,
 		ProgramCount:   len(programIDs),
 	}, nil
@@ -161,18 +169,22 @@ type GetSubscribersResult struct {
 }
 
 // GetSubscribers returns all clients subscribed to a specific program
-func (uc *ManageSubscriptionsUseCase) GetSubscribers(ctx context.Context, query GetSubscribersQuery) (*GetSubscribersResult, error) {
+func (uc *ManageSubscriptionsUseCase) GetSubscribers(ctx context.Context, query interface{}) (interface{}, error) {
+	getSubscribersQuery, ok := query.(*GetSubscribersQuery)
+	if !ok {
+		return nil, fmt.Errorf("invalid query type")
+	}
 	startTime := time.Now()
 
-	uc.logger.WithField("program_id", query.ProgramID).Debug("Getting subscribers for program")
+	uc.logger.WithField("program_id", getSubscribersQuery.ProgramID).Debug("Getting subscribers for program")
 
 	// Business Rule 1: Validate query
-	if query.ProgramID == "" {
+	if getSubscribersQuery.ProgramID == "" {
 		return nil, fmt.Errorf("program ID is required")
 	}
 
 	// Business Rule 2: Get subscribers
-	subscribers, err := uc.subscriptionRepo.GetSubscribers(ctx, query.ProgramID)
+	subscribers, err := uc.subscriptionRepo.GetSubscribers(ctx, getSubscribersQuery.ProgramID)
 	if err != nil {
 		uc.logger.WithError(err).Error("Failed to get subscribers")
 		return nil, fmt.Errorf("failed to get subscribers: %w", err)
@@ -181,7 +193,7 @@ func (uc *ManageSubscriptionsUseCase) GetSubscribers(ctx context.Context, query 
 	queryTime := time.Since(startTime)
 
 	return &GetSubscribersResult{
-		ProgramID:       query.ProgramID,
+		ProgramID:       getSubscribersQuery.ProgramID,
 		Subscribers:     subscribers,
 		SubscriberCount: len(subscribers),
 		QueryTime:       queryTime,

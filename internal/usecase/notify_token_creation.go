@@ -49,34 +49,38 @@ type NotifyTokenCreationResult struct {
 }
 
 // Execute processes a token creation notification according to business rules
-func (uc *NotifyTokenCreationUseCase) Execute(ctx context.Context, cmd NotifyTokenCreationCommand) (*NotifyTokenCreationResult, error) {
+func (uc *NotifyTokenCreationUseCase) Execute(ctx context.Context, cmd interface{}) (interface{}, error) {
+	command, ok := cmd.(*NotifyTokenCreationCommand)
+	if !ok {
+		return nil, fmt.Errorf("invalid command type")
+	}
 	// Log the start of notification processing
 	uc.logger.WithFields(map[string]interface{}{
-		"token_address":    cmd.TokenAddress,
-		"token_name":       cmd.TokenName,
-		"token_symbol":     cmd.TokenSymbol,
-		"creator_address":  cmd.CreatorAddress,
-		"transaction_hash": cmd.TransactionHash,
+		"token_address":    command.TokenAddress,
+		"token_name":       command.TokenName,
+		"token_symbol":     command.TokenSymbol,
+		"creator_address":  command.CreatorAddress,
+		"transaction_hash": command.TransactionHash,
 	}).Info("Starting token creation notification")
 
 	// Business Rule 1: Create domain token creation event
 	event := &domain.TokenCreationEvent{
-		TokenAddress:    cmd.TokenAddress,
-		TokenName:       cmd.TokenName,
-		TokenSymbol:     cmd.TokenSymbol,
-		CreatorAddress:  cmd.CreatorAddress,
-		InitialSupply:   cmd.InitialSupply,
-		Decimals:        cmd.Decimals,
-		Timestamp:       cmd.Timestamp,
-		TransactionHash: cmd.TransactionHash,
-		Slot:            cmd.Slot,
-		Metadata:        cmd.Metadata,
+		TokenAddress:    command.TokenAddress,
+		TokenName:       command.TokenName,
+		TokenSymbol:     command.TokenSymbol,
+		CreatorAddress:  command.CreatorAddress,
+		InitialSupply:   command.InitialSupply,
+		Decimals:        command.Decimals,
+		Timestamp:       command.Timestamp,
+		TransactionHash: command.TransactionHash,
+		Slot:            command.Slot,
+		Metadata:        command.Metadata,
 	}
 
 	// Business Rule 2: Validate token creation event
 	if !event.IsValid() {
-		uc.logger.WithField("token_address", cmd.TokenAddress).Error("Token creation event validation failed")
-		return nil, fmt.Errorf("token creation event validation failed: token_address=%s", cmd.TokenAddress)
+		uc.logger.WithField("token_address", command.TokenAddress).Error("Token creation event validation failed")
+		return nil, fmt.Errorf("token creation event validation failed: token_address=%s", command.TokenAddress)
 	}
 
 	// Business Rule 3: Check Discord service health before sending
@@ -105,7 +109,7 @@ func (uc *NotifyTokenCreationUseCase) Execute(ctx context.Context, cmd NotifyTok
 		"token_address":   event.TokenAddress,
 		"token_name":      event.GetDisplayName(),
 		"creator_address": event.CreatorAddress,
-		"processing_time": time.Since(cmd.Timestamp).String(),
+		"processing_time": time.Since(command.Timestamp).String(),
 	}).Info("Token creation notification sent successfully")
 
 	return &NotifyTokenCreationResult{
@@ -146,5 +150,15 @@ func (uc *NotifyTokenCreationUseCase) ExecuteFromTransaction(ctx context.Context
 		Metadata:        tx.Metadata,
 	}
 
-	return uc.Execute(ctx, cmd)
+	result, err := uc.Execute(ctx, cmd)
+	if err != nil {
+		return nil, err
+	}
+
+	notifyResult, ok := result.(*NotifyTokenCreationResult)
+	if !ok {
+		return nil, fmt.Errorf("invalid result type from Execute")
+	}
+
+	return notifyResult, nil
 }

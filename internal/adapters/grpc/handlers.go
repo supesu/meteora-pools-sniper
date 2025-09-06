@@ -15,12 +15,12 @@ import (
 // Handler contains all gRPC method handlers
 type Handler struct {
 	logger                      logger.Logger
-	processTransactionUC        *usecase.ProcessTransactionUseCase
-	getTransactionHistoryUC     *usecase.GetTransactionHistoryUseCase
-	manageSubscriptionsUC       *usecase.ManageSubscriptionsUseCase
-	notifyTokenCreationUC       *usecase.NotifyTokenCreationUseCase
-	processMeteoraEventUC       *usecase.ProcessMeteoraEventUseCase
-	notifyMeteoraPoolCreationUC *usecase.NotifyMeteoraPoolCreationUseCase
+	processTransactionUC        domain.ProcessTransactionUseCaseInterface
+	getTransactionHistoryUC     domain.GetTransactionHistoryUseCaseInterface
+	manageSubscriptionsUC       domain.ManageSubscriptionsUseCaseInterface
+	notifyTokenCreationUC       domain.NotifyTokenCreationUseCaseInterface
+	processMeteoraEventUC       domain.ProcessMeteoraEventUseCaseInterface
+	notifyMeteoraPoolCreationUC domain.NotifyMeteoraPoolCreationUseCaseInterface
 	subscriptionRepo            domain.SubscriptionRepository
 	converter                   *Converter
 	streaming                   *Streaming
@@ -29,12 +29,12 @@ type Handler struct {
 // NewHandler creates a new handler instance
 func NewHandler(
 	logger logger.Logger,
-	processTransactionUC *usecase.ProcessTransactionUseCase,
-	getTransactionHistoryUC *usecase.GetTransactionHistoryUseCase,
-	manageSubscriptionsUC *usecase.ManageSubscriptionsUseCase,
-	notifyTokenCreationUC *usecase.NotifyTokenCreationUseCase,
-	processMeteoraEventUC *usecase.ProcessMeteoraEventUseCase,
-	notifyMeteoraPoolCreationUC *usecase.NotifyMeteoraPoolCreationUseCase,
+	processTransactionUC domain.ProcessTransactionUseCaseInterface,
+	getTransactionHistoryUC domain.GetTransactionHistoryUseCaseInterface,
+	manageSubscriptionsUC domain.ManageSubscriptionsUseCaseInterface,
+	notifyTokenCreationUC domain.NotifyTokenCreationUseCaseInterface,
+	processMeteoraEventUC domain.ProcessMeteoraEventUseCaseInterface,
+	notifyMeteoraPoolCreationUC domain.NotifyMeteoraPoolCreationUseCaseInterface,
 	subscriptionRepo domain.SubscriptionRepository,
 	converter *Converter,
 	streaming *Streaming,
@@ -55,12 +55,28 @@ func NewHandler(
 
 // ProcessTransaction handles incoming transaction data
 func (h *Handler) ProcessTransaction(ctx context.Context, req *pb.ProcessTransactionRequest) (*pb.ProcessTransactionResponse, error) {
+	if req == nil {
+		h.logger.Error("Process transaction request is nil")
+		return &pb.ProcessTransactionResponse{
+			Success: false,
+			Message: "Request cannot be nil",
+		}, nil
+	}
+
+	// Convert protobuf to domain
+	if req.Transaction == nil {
+		h.logger.Error("Transaction in request is nil")
+		return &pb.ProcessTransactionResponse{
+			Success: false,
+			Message: "Transaction cannot be nil",
+		}, nil
+	}
+
 	h.logger.WithFields(map[string]interface{}{
 		"signature":  req.Transaction.Signature,
 		"scanner_id": req.ScannerId,
 	}).Info("Processing transaction")
 
-	// Convert protobuf to domain
 	tx := h.converter.convertProtobufToDomain(req.Transaction)
 
 	// Create command and execute use case
@@ -76,12 +92,29 @@ func (h *Handler) ProcessTransaction(ctx context.Context, req *pb.ProcessTransac
 		ScannerID: req.ScannerId,
 	}
 
+	if h.processTransactionUC == nil {
+		h.logger.Error("Process transaction use case not available")
+		return &pb.ProcessTransactionResponse{
+			Success: false,
+			Message: "Process transaction use case not available",
+		}, nil
+	}
+
 	result, err := h.processTransactionUC.Execute(ctx, cmd)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to process transaction")
 		return &pb.ProcessTransactionResponse{
 			Success: false,
 			Message: fmt.Sprintf("Failed to process transaction: %v", err),
+		}, nil
+	}
+
+	processResult, ok := result.(*usecase.ProcessTransactionResult)
+	if !ok {
+		h.logger.Error("Invalid result type from process transaction use case")
+		return &pb.ProcessTransactionResponse{
+			Success: false,
+			Message: "Invalid result type from process transaction use case",
 		}, nil
 	}
 
@@ -95,20 +128,36 @@ func (h *Handler) ProcessTransaction(ctx context.Context, req *pb.ProcessTransac
 
 	return &pb.ProcessTransactionResponse{
 		Success:       true,
-		Message:       result.Message,
-		TransactionId: result.TransactionID,
+		Message:       processResult.Message,
+		TransactionId: processResult.TransactionID,
 	}, nil
 }
 
 // ProcessMeteoraEvent handles incoming Meteora pool events
 func (h *Handler) ProcessMeteoraEvent(ctx context.Context, req *pb.ProcessMeteoraEventRequest) (*pb.ProcessMeteoraEventResponse, error) {
+	if req == nil {
+		h.logger.Error("Process Meteora event request is nil")
+		return &pb.ProcessMeteoraEventResponse{
+			Success: false,
+			Message: "Request cannot be nil",
+		}, nil
+	}
+
+	// Convert protobuf to domain
+	if req.MeteoraEvent == nil {
+		h.logger.Error("Meteora event in request is nil")
+		return &pb.ProcessMeteoraEventResponse{
+			Success: false,
+			Message: "Meteora event cannot be nil",
+		}, nil
+	}
+
 	h.logger.WithFields(map[string]interface{}{
 		"event_type":   req.MeteoraEvent.EventType,
 		"pool_address": req.MeteoraEvent.PoolInfo.PoolAddress,
 		"scanner_id":   req.ScannerId,
 	}).Info("Processing Meteora event")
 
-	// Convert protobuf to domain
 	event := h.converter.convertProtobufEventToDomain(req.MeteoraEvent)
 
 	// Create command and execute use case
@@ -121,12 +170,29 @@ func (h *Handler) ProcessMeteoraEvent(ctx context.Context, req *pb.ProcessMeteor
 		Slot:          event.Slot,
 	}
 
+	if h.processMeteoraEventUC == nil {
+		h.logger.Error("Process Meteora event use case not available")
+		return &pb.ProcessMeteoraEventResponse{
+			Success: false,
+			Message: "Process Meteora event use case not available",
+		}, nil
+	}
+
 	result, err := h.processMeteoraEventUC.Execute(ctx, cmd)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to process Meteora event")
 		return &pb.ProcessMeteoraEventResponse{
 			Success: false,
 			Message: fmt.Sprintf("Failed to process Meteora event: %v", err),
+		}, nil
+	}
+
+	meteoraResult, ok := result.(*usecase.ProcessMeteoraEventResult)
+	if !ok {
+		h.logger.Error("Invalid result type from process Meteora event use case")
+		return &pb.ProcessMeteoraEventResponse{
+			Success: false,
+			Message: "Invalid result type from process Meteora event use case",
 		}, nil
 	}
 
@@ -140,13 +206,18 @@ func (h *Handler) ProcessMeteoraEvent(ctx context.Context, req *pb.ProcessMeteor
 
 	return &pb.ProcessMeteoraEventResponse{
 		Success: true,
-		Message: result.Message,
-		EventId: result.EventID,
+		Message: meteoraResult.Message,
+		EventId: meteoraResult.EventID,
 	}, nil
 }
 
 // GetTransactionHistory retrieves historical transaction data
 func (h *Handler) GetTransactionHistory(ctx context.Context, req *pb.GetTransactionHistoryRequest) (*pb.GetTransactionHistoryResponse, error) {
+	if req == nil {
+		h.logger.Error("Get transaction history request is nil")
+		return nil, fmt.Errorf("request cannot be nil")
+	}
+
 	h.logger.WithFields(map[string]interface{}{
 		"program_id": req.ProgramId,
 		"limit":      req.Limit,
@@ -172,22 +243,33 @@ func (h *Handler) GetTransactionHistory(ctx context.Context, req *pb.GetTransact
 		query.EndTime = &endTime
 	}
 
+	if h.getTransactionHistoryUC == nil {
+		h.logger.Error("Get transaction history use case not available")
+		return nil, fmt.Errorf("get transaction history use case not available")
+	}
+
 	result, err := h.getTransactionHistoryUC.Execute(ctx, query)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to get transaction history")
 		return nil, fmt.Errorf("failed to get transaction history: %w", err)
 	}
 
+	historyResult, ok := result.(*usecase.GetTransactionHistoryResult)
+	if !ok {
+		h.logger.Error("Invalid result type from get transaction history use case")
+		return nil, fmt.Errorf("invalid result type from get transaction history use case")
+	}
+
 	// Convert to protobuf
-	pbTransactions := make([]*pb.Transaction, len(result.Transactions))
-	for i, tx := range result.Transactions {
+	pbTransactions := make([]*pb.Transaction, len(historyResult.Transactions))
+	for i, tx := range historyResult.Transactions {
 		pbTransactions[i] = h.converter.convertDomainToProtobuf(tx)
 	}
 
 	return &pb.GetTransactionHistoryResponse{
 		Transactions: pbTransactions,
-		NextCursor:   h.generateCursor(query.Offset + len(result.Transactions)),
-		HasMore:      result.HasMore,
+		NextCursor:   h.generateCursor(query.Offset + len(historyResult.Transactions)),
+		HasMore:      historyResult.HasMore,
 	}, nil
 }
 
@@ -223,8 +305,14 @@ func (h *Handler) GetHealthStatus(ctx context.Context, req *pb.HealthRequest) (*
 
 // Helper methods
 func (h *Handler) parseCursor(cursor string) int {
-	// Simplified cursor parsing
-	return 0
+	// Simplified cursor parsing - just convert string to int
+	if cursor == "" {
+		return 0
+	}
+	// For now, just use fmt.Sscanf to parse the integer
+	var offset int
+	fmt.Sscanf(cursor, "%d", &offset)
+	return offset
 }
 
 func (h *Handler) generateCursor(offset int) string {

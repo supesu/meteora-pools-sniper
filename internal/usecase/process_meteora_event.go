@@ -66,54 +66,62 @@ type ProcessMeteoraEventResult struct {
 }
 
 // Execute processes a Meteora event according to business rules
-func (uc *ProcessMeteoraEventUseCase) Execute(ctx context.Context, cmd ProcessMeteoraEventCommand) (*ProcessMeteoraEventResult, error) {
+func (uc *ProcessMeteoraEventUseCase) Execute(ctx context.Context, cmd interface{}) (interface{}, error) {
+	command, ok := cmd.(*ProcessMeteoraEventCommand)
+	if !ok {
+		return nil, fmt.Errorf("invalid command type")
+	}
 	// Log the start of Meteora event processing
 	uc.logger.WithFields(map[string]interface{}{
-		"event_type":     cmd.EventType,
-		"pool_address":   cmd.PoolAddress,
-		"token_pair":     fmt.Sprintf("%s/%s", cmd.TokenASymbol, cmd.TokenBSymbol),
-		"creator_wallet": cmd.CreatorWallet,
-		"scanner_id":     cmd.ScannerID,
-		"slot":           cmd.Slot,
+		"event_type":     command.EventType,
+		"pool_address":   command.PoolAddress,
+		"token_pair":     fmt.Sprintf("%s/%s", command.TokenASymbol, command.TokenBSymbol),
+		"creator_wallet": command.CreatorWallet,
+		"scanner_id":     command.ScannerID,
+		"slot":           command.Slot,
 	}).Info("Starting Meteora event processing")
 
 	// Business Rule 1: Create domain pool event
 	poolEvent := &domain.MeteoraPoolEvent{
-		PoolAddress:       cmd.PoolAddress,
-		TokenAMint:        cmd.TokenAMint,
-		TokenBMint:        cmd.TokenBMint,
-		TokenASymbol:      cmd.TokenASymbol,
-		TokenBSymbol:      cmd.TokenBSymbol,
-		TokenAName:        cmd.TokenAName,
-		TokenBName:        cmd.TokenBName,
-		CreatorWallet:     cmd.CreatorWallet,
-		PoolType:          cmd.PoolType,
-		InitialLiquidityA: cmd.InitialLiquidityA,
-		InitialLiquidityB: cmd.InitialLiquidityB,
-		FeeRate:           cmd.FeeRate,
-		CreatedAt:         cmd.CreatedAt,
-		TransactionHash:   cmd.TransactionHash,
-		Slot:              cmd.Slot,
-		Metadata:          cmd.Metadata,
+		PoolAddress:       command.PoolAddress,
+		TokenAMint:        command.TokenAMint,
+		TokenBMint:        command.TokenBMint,
+		TokenASymbol:      command.TokenASymbol,
+		TokenBSymbol:      command.TokenBSymbol,
+		TokenAName:        command.TokenAName,
+		TokenBName:        command.TokenBName,
+		CreatorWallet:     command.CreatorWallet,
+		PoolType:          command.PoolType,
+		InitialLiquidityA: command.InitialLiquidityA,
+		InitialLiquidityB: command.InitialLiquidityB,
+		FeeRate:           command.FeeRate,
+		CreatedAt:         command.CreatedAt,
+		TransactionHash:   command.TransactionHash,
+		Slot:              command.Slot,
+		Metadata:          command.Metadata,
 	}
 
 	// Business Rule 2: Validate pool event integrity
 	if !poolEvent.IsValid() {
-		uc.logger.WithField("pool_address", cmd.PoolAddress).Error("Meteora pool event validation failed")
+		uc.logger.WithField("pool_address", command.PoolAddress).Error("Meteora pool event validation failed")
 
 		// Publish failure event
 		if uc.eventPublisher != nil {
-			_ = uc.eventPublisher.PublishTransactionFailed(ctx, cmd.TransactionHash, "pool event validation failed")
+			_ = uc.eventPublisher.PublishTransactionFailed(ctx, command.TransactionHash, "pool event validation failed")
 		}
 
-		return nil, fmt.Errorf("meteora pool event validation failed: pool_address=%s", cmd.PoolAddress)
+		return nil, fmt.Errorf("meteora pool event validation failed: pool_address=%s", command.PoolAddress)
 	}
 
 	// Business Rule 3: Check for duplicate pool events
-	existing, err := uc.meteoraRepo.FindPoolByAddress(ctx, cmd.PoolAddress)
-	if err == nil && existing != nil {
+	existing, err := uc.meteoraRepo.FindPoolByAddress(ctx, command.PoolAddress)
+	if err != nil {
+		uc.logger.WithError(err).Error("Failed to check for existing pool")
+		return nil, fmt.Errorf("failed to check for existing pool: %w", err)
+	}
+	if existing != nil {
 		uc.logger.WithFields(map[string]interface{}{
-			"pool_address": cmd.PoolAddress,
+			"pool_address": command.PoolAddress,
 			"existing_age": existing.Age().String(),
 		}).Warn("Duplicate Meteora pool detected")
 
@@ -127,7 +135,7 @@ func (uc *ProcessMeteoraEventUseCase) Execute(ctx context.Context, cmd ProcessMe
 	// Business Rule 4: Apply quality filters
 	if !uc.passesQualityFilters(poolEvent) {
 		uc.logger.WithFields(map[string]interface{}{
-			"pool_address": cmd.PoolAddress,
+			"pool_address": command.PoolAddress,
 			"token_pair":   poolEvent.GetPairDisplayName(),
 		}).Info("Pool event filtered out due to quality rules")
 
@@ -147,8 +155,8 @@ func (uc *ProcessMeteoraEventUseCase) Execute(ctx context.Context, cmd ProcessMe
 		TokenBSymbol:    poolEvent.TokenBSymbol,
 		TokenAName:      poolEvent.TokenAName,
 		TokenBName:      poolEvent.TokenBName,
-		TokenADecimals:  cmd.TokenADecimals,
-		TokenBDecimals:  cmd.TokenBDecimals,
+		TokenADecimals:  command.TokenADecimals,
+		TokenBDecimals:  command.TokenBDecimals,
 		CreatorWallet:   poolEvent.CreatorWallet,
 		PoolType:        poolEvent.PoolType,
 		FeeRate:         poolEvent.FeeRate,
@@ -164,7 +172,7 @@ func (uc *ProcessMeteoraEventUseCase) Execute(ctx context.Context, cmd ProcessMe
 
 		// Publish failure event
 		if uc.eventPublisher != nil {
-			_ = uc.eventPublisher.PublishTransactionFailed(ctx, cmd.TransactionHash, "pool storage failed")
+			_ = uc.eventPublisher.PublishTransactionFailed(ctx, command.TransactionHash, "pool storage failed")
 		}
 
 		return nil, fmt.Errorf("failed to store Meteora pool: %w", err)
@@ -172,7 +180,7 @@ func (uc *ProcessMeteoraEventUseCase) Execute(ctx context.Context, cmd ProcessMe
 
 	// Business Rule 7: Publish success event for downstream processing
 	if uc.eventPublisher != nil {
-		eventType := domain.MeteoraEventType(cmd.EventType)
+		eventType := domain.MeteoraEventType(command.EventType)
 
 		switch eventType {
 		case domain.MeteoraEventTypePoolCreated:
@@ -192,7 +200,7 @@ func (uc *ProcessMeteoraEventUseCase) Execute(ctx context.Context, cmd ProcessMe
 		"pool_address":    poolEvent.PoolAddress,
 		"token_pair":      poolEvent.GetPairDisplayName(),
 		"creator_wallet":  poolEvent.CreatorWallet,
-		"processing_time": time.Since(cmd.CreatedAt).String(),
+		"processing_time": time.Since(command.CreatedAt).String(),
 		"event_id":        poolEvent.PoolAddress,
 	}).Info("Meteora pool event processed successfully")
 

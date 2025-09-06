@@ -46,49 +46,54 @@ type GetTransactionHistoryResult struct {
 }
 
 // Execute retrieves transaction history according to business rules
-func (uc *GetTransactionHistoryUseCase) Execute(ctx context.Context, query GetTransactionHistoryQuery) (*GetTransactionHistoryResult, error) {
+func (uc *GetTransactionHistoryUseCase) Execute(ctx context.Context, query interface{}) (interface{}, error) {
+	q, ok := query.(*GetTransactionHistoryQuery)
+	if !ok {
+		return nil, fmt.Errorf("invalid query type")
+	}
 	startTime := time.Now()
 
 	uc.logger.WithFields(map[string]interface{}{
-		"program_id": query.ProgramID,
-		"limit":      query.Limit,
-		"offset":     query.Offset,
-		"scanner_id": query.ScannerID,
+		"program_id": q.ProgramID,
+		"limit":      q.Limit,
+		"offset":     q.Offset,
+		"scanner_id": q.ScannerID,
 	}).Info("Executing transaction history query")
 
 	// Business Rule 1: Validate query parameters
-	if err := uc.validateQuery(query); err != nil {
+	if err := uc.validateQuery(*q); err != nil {
 		return nil, fmt.Errorf("query validation failed: %w", err)
 	}
 
 	// Business Rule 2: Apply default limits and constraints
-	query = uc.applyBusinessConstraints(query)
+	constrainedQuery := uc.applyBusinessConstraints(*q)
+	q = &constrainedQuery
 
 	// Business Rule 3: Build query options
 	opts := domain.QueryOptions{
-		Limit:     query.Limit,
-		Offset:    query.Offset,
+		Limit:     q.Limit,
+		Offset:    q.Offset,
 		SortBy:    "timestamp",
 		SortOrder: domain.SortOrderDesc, // Always return newest first
-		Status:    query.Status,
-		ScannerID: query.ScannerID,
+		Status:    q.Status,
+		ScannerID: q.ScannerID,
 	}
 
 	var transactions []*domain.Transaction
 	var err error
 
 	// Business Rule 4: Execute appropriate query based on criteria
-	if query.StartTime != nil && query.EndTime != nil {
+	if q.StartTime != nil && q.EndTime != nil {
 		// Time range query
-		transactions, err = uc.transactionRepo.FindByTimeRange(ctx, *query.StartTime, *query.EndTime, opts)
+		transactions, err = uc.transactionRepo.FindByTimeRange(ctx, *q.StartTime, *q.EndTime, opts)
 		uc.logger.WithFields(map[string]interface{}{
-			"start_time": query.StartTime.Format(time.RFC3339),
-			"end_time":   query.EndTime.Format(time.RFC3339),
+			"start_time": q.StartTime.Format(time.RFC3339),
+			"end_time":   q.EndTime.Format(time.RFC3339),
 		}).Debug("Executing time range query")
-	} else if query.ProgramID != "" {
+	} else if q.ProgramID != "" {
 		// Program-specific query
-		transactions, err = uc.transactionRepo.FindByProgram(ctx, query.ProgramID, opts)
-		uc.logger.WithField("program_id", query.ProgramID).Debug("Executing program query")
+		transactions, err = uc.transactionRepo.FindByProgram(ctx, q.ProgramID, opts)
+		uc.logger.WithField("program_id", q.ProgramID).Debug("Executing program query")
 	} else {
 		// Default query: recent transactions
 		endTime := time.Now()
@@ -104,14 +109,14 @@ func (uc *GetTransactionHistoryUseCase) Execute(ctx context.Context, query GetTr
 
 	// Business Rule 5: Get total count for pagination metadata
 	var totalCount int64
-	if query.ProgramID != "" {
-		totalCount, _ = uc.transactionRepo.CountByProgram(ctx, query.ProgramID)
+	if q.ProgramID != "" {
+		totalCount, _ = uc.transactionRepo.CountByProgram(ctx, q.ProgramID)
 	} else {
 		totalCount, _ = uc.transactionRepo.Count(ctx)
 	}
 
 	// Business Rule 6: Calculate pagination metadata
-	hasMore := int64(query.Offset+len(transactions)) < totalCount
+	hasMore := int64(q.Offset+len(transactions)) < totalCount
 
 	queryTime := time.Since(startTime)
 

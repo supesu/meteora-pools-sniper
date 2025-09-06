@@ -50,59 +50,63 @@ type ProcessTransactionResult struct {
 }
 
 // Execute processes a transaction according to business rules
-func (uc *ProcessTransactionUseCase) Execute(ctx context.Context, cmd ProcessTransactionCommand) (*ProcessTransactionResult, error) {
+func (uc *ProcessTransactionUseCase) Execute(ctx context.Context, cmd interface{}) (interface{}, error) {
+	command, ok := cmd.(*ProcessTransactionCommand)
+	if !ok {
+		return nil, fmt.Errorf("invalid command type")
+	}
 	// Log the start of transaction processing
 	uc.logger.WithFields(map[string]interface{}{
-		"signature":  cmd.Signature,
-		"program_id": cmd.ProgramID,
-		"scanner_id": cmd.ScannerID,
-		"slot":       cmd.Slot,
+		"signature":  command.Signature,
+		"program_id": command.ProgramID,
+		"scanner_id": command.ScannerID,
+		"slot":       command.Slot,
 	}).Info("Starting transaction processing")
 
 	// Business Rule 1: Create domain transaction
 	tx := &domain.Transaction{
-		Signature: cmd.Signature,
-		ProgramID: cmd.ProgramID,
-		Accounts:  cmd.Accounts,
-		Data:      cmd.Data,
-		Timestamp: cmd.Timestamp,
-		Slot:      cmd.Slot,
-		Status:    cmd.Status,
-		Metadata:  cmd.Metadata,
-		ScannerID: cmd.ScannerID,
+		Signature: command.Signature,
+		ProgramID: command.ProgramID,
+		Accounts:  command.Accounts,
+		Data:      command.Data,
+		Timestamp: command.Timestamp,
+		Slot:      command.Slot,
+		Status:    command.Status,
+		Metadata:  command.Metadata,
+		ScannerID: command.ScannerID,
 	}
 
 	// Business Rule 2: Validate transaction integrity
 	if !tx.IsValid() {
-		uc.logger.WithField("signature", cmd.Signature).Error("Transaction validation failed")
+		uc.logger.WithField("signature", command.Signature).Error("Transaction validation failed")
 
 		// Publish failure event
 		if uc.eventPublisher != nil {
-			_ = uc.eventPublisher.PublishTransactionFailed(ctx, cmd.Signature, "validation failed")
+			_ = uc.eventPublisher.PublishTransactionFailed(ctx, command.Signature, "validation failed")
 		}
 
-		return nil, fmt.Errorf("transaction validation failed: signature=%s", cmd.Signature)
+		return nil, fmt.Errorf("transaction validation failed: signature=%s", command.Signature)
 	}
 
 	// Business Rule 3: Check for duplicate transactions
-	existing, err := uc.transactionRepo.FindBySignature(ctx, cmd.Signature)
+	existing, err := uc.transactionRepo.FindBySignature(ctx, command.Signature)
 	if err == nil && existing != nil {
 		uc.logger.WithFields(map[string]interface{}{
-			"signature":    cmd.Signature,
+			"signature":    command.Signature,
 			"existing_age": existing.Age().String(),
 		}).Warn("Duplicate transaction detected")
 
 		// Business Rule 3a: Update existing transaction if status changed
-		if existing.Status != cmd.Status {
-			existing.Status = cmd.Status
-			existing.Metadata = cmd.Metadata // Update metadata
+		if existing.Status != command.Status {
+			existing.Status = command.Status
+			existing.Metadata = command.Metadata // Update metadata
 
 			if err := uc.transactionRepo.Update(ctx, existing); err != nil {
 				uc.logger.WithError(err).Error("Failed to update existing transaction")
 				return nil, fmt.Errorf("failed to update existing transaction: %w", err)
 			}
 
-			uc.logger.WithField("signature", cmd.Signature).Info("Updated existing transaction status")
+			uc.logger.WithField("signature", command.Signature).Info("Updated existing transaction status")
 		}
 
 		return &ProcessTransactionResult{
@@ -118,7 +122,7 @@ func (uc *ProcessTransactionUseCase) Execute(ctx context.Context, cmd ProcessTra
 
 		// Publish failure event
 		if uc.eventPublisher != nil {
-			_ = uc.eventPublisher.PublishTransactionFailed(ctx, cmd.Signature, "storage failed")
+			_ = uc.eventPublisher.PublishTransactionFailed(ctx, command.Signature, "storage failed")
 		}
 
 		return nil, fmt.Errorf("failed to store transaction: %w", err)
@@ -136,7 +140,7 @@ func (uc *ProcessTransactionUseCase) Execute(ctx context.Context, cmd ProcessTra
 		"signature":       tx.Signature,
 		"program_id":      tx.ProgramID,
 		"transaction_id":  tx.Signature,
-		"processing_time": time.Since(cmd.Timestamp).String(),
+		"processing_time": time.Since(command.Timestamp).String(),
 	}).Info("Transaction processed successfully")
 
 	return &ProcessTransactionResult{

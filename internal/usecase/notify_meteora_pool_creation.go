@@ -63,39 +63,43 @@ type NotifyMeteoraPoolCreationResult struct {
 }
 
 // Execute processes a Meteora pool creation notification according to business rules
-func (uc *NotifyMeteoraPoolCreationUseCase) Execute(ctx context.Context, cmd NotifyMeteoraPoolCreationCommand) (*NotifyMeteoraPoolCreationResult, error) {
+func (uc *NotifyMeteoraPoolCreationUseCase) Execute(ctx context.Context, cmd interface{}) (interface{}, error) {
+	command, ok := cmd.(*NotifyMeteoraPoolCreationCommand)
+	if !ok {
+		return nil, fmt.Errorf("invalid command type")
+	}
 	// Log the start of notification processing
 	uc.logger.WithFields(map[string]interface{}{
-		"pool_address":   cmd.PoolAddress,
-		"token_pair":     fmt.Sprintf("%s/%s", cmd.TokenASymbol, cmd.TokenBSymbol),
-		"creator_wallet": cmd.CreatorWallet,
-		"pool_type":      cmd.PoolType,
+		"pool_address":   command.PoolAddress,
+		"token_pair":     fmt.Sprintf("%s/%s", command.TokenASymbol, command.TokenBSymbol),
+		"creator_wallet": command.CreatorWallet,
+		"pool_type":      command.PoolType,
 	}).Info("Starting Meteora pool creation notification")
 
 	// Business Rule 1: Create domain Meteora pool event
 	event := &domain.MeteoraPoolEvent{
-		PoolAddress:       cmd.PoolAddress,
-		TokenAMint:        cmd.TokenAMint,
-		TokenBMint:        cmd.TokenBMint,
-		TokenASymbol:      cmd.TokenASymbol,
-		TokenBSymbol:      cmd.TokenBSymbol,
-		TokenAName:        cmd.TokenAName,
-		TokenBName:        cmd.TokenBName,
-		CreatorWallet:     cmd.CreatorWallet,
-		PoolType:          cmd.PoolType,
-		InitialLiquidityA: cmd.InitialLiquidityA,
-		InitialLiquidityB: cmd.InitialLiquidityB,
-		FeeRate:           cmd.FeeRate,
-		CreatedAt:         cmd.CreatedAt,
-		TransactionHash:   cmd.TransactionHash,
-		Slot:              cmd.Slot,
-		Metadata:          cmd.Metadata,
+		PoolAddress:       command.PoolAddress,
+		TokenAMint:        command.TokenAMint,
+		TokenBMint:        command.TokenBMint,
+		TokenASymbol:      command.TokenASymbol,
+		TokenBSymbol:      command.TokenBSymbol,
+		TokenAName:        command.TokenAName,
+		TokenBName:        command.TokenBName,
+		CreatorWallet:     command.CreatorWallet,
+		PoolType:          command.PoolType,
+		InitialLiquidityA: command.InitialLiquidityA,
+		InitialLiquidityB: command.InitialLiquidityB,
+		FeeRate:           command.FeeRate,
+		CreatedAt:         command.CreatedAt,
+		TransactionHash:   command.TransactionHash,
+		Slot:              command.Slot,
+		Metadata:          command.Metadata,
 	}
 
 	// Business Rule 2: Validate Meteora pool event
 	if !event.IsValid() {
-		uc.logger.WithField("pool_address", cmd.PoolAddress).Error("Meteora pool event validation failed")
-		return nil, fmt.Errorf("meteora pool event validation failed: pool_address=%s", cmd.PoolAddress)
+		uc.logger.WithField("pool_address", command.PoolAddress).Error("Meteora pool event validation failed")
+		return nil, fmt.Errorf("meteora pool event validation failed: pool_address=%s", command.PoolAddress)
 	}
 
 	// Business Rule 3: Apply notification quality filters
@@ -139,7 +143,7 @@ func (uc *NotifyMeteoraPoolCreationUseCase) Execute(ctx context.Context, cmd Not
 		"pool_address":    event.PoolAddress,
 		"token_pair":      event.GetPairDisplayName(),
 		"creator_wallet":  event.CreatorWallet,
-		"processing_time": time.Since(cmd.CreatedAt).String(),
+		"processing_time": time.Since(command.CreatedAt).String(),
 	}).Info("Meteora pool creation notification sent successfully")
 
 	return &NotifyMeteoraPoolCreationResult{
@@ -240,5 +244,15 @@ func (uc *NotifyMeteoraPoolCreationUseCase) ExecuteFromMeteoraEvent(ctx context.
 		Metadata:          event.Metadata,
 	}
 
-	return uc.Execute(ctx, cmd)
+	result, err := uc.Execute(ctx, cmd)
+	if err != nil {
+		return nil, err
+	}
+
+	notifyResult, ok := result.(*NotifyMeteoraPoolCreationResult)
+	if !ok {
+		return nil, fmt.Errorf("invalid result type from Execute")
+	}
+
+	return notifyResult, nil
 }
